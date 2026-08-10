@@ -690,20 +690,41 @@ async function crearFilaPrenda(it, origenUrl){
     if(subCrop.ok) fotoRealUrl = subCrop.url;
   }
   let fotoGeneradaUrl = '';
+  let fotoGeneradaBase64 = null; // se reusa abajo para el maniquí sin re-descargarla
   if(it.cropPreview){
     const gen = await apiPost('generarFotoCatalogo', {
       imageBase64: it.cropPreview.split(',')[1], mimeType:'image/jpeg',
       categoria: it.categoria, tipo: it.tipo, color: it.color, colorSecundario: it.colorSecundario, estampado: it.estampado
     });
     if(gen.ok){
+      fotoGeneradaBase64 = { base64: gen.imageBase64, mimeType: gen.mimeType||'image/jpeg' };
       const subGen = await apiPost('uploadImage', { imageBase64: gen.imageBase64, mimeType: gen.mimeType||'image/jpeg', fileName:'catalogo-'+Date.now()+'.jpg' });
       if(subGen.ok) fotoGeneradaUrl = subGen.url;
+    }
+  }
+  // También se genera de una vez puesta en el maniquí compartido (no
+  // hasta la primera vez que se desliza hasta ella en el vestidor) —
+  // pedido explícito para que swipear ahí siempre sea instantáneo. Si
+  // esto falla no se bloquea el guardado: obtenerFotoManiqui la genera
+  // sola después si hace falta.
+  let fotoManiquiUrl = '';
+  if(fotoGeneradaBase64){
+    const maniqui = await obtenerManiquiBase(localStorage.getItem('ropa_maniqui_genero')||'mujer');
+    if(maniqui){
+      const rManiqui = await apiPost('generarOutfitEnManiqui', {
+        maniquiBase64: maniqui.base64, maniquiMimeType: maniqui.mimeType,
+        prendas: [{ base64: fotoGeneradaBase64.base64, mimeType: fotoGeneradaBase64.mimeType, categoria: it.categoria }]
+      });
+      if(rManiqui.ok){
+        const subManiqui = await apiPost('uploadImage', { imageBase64: rManiqui.imageBase64, mimeType: rManiqui.mimeType||'image/jpeg', fileName:'maniqui-prenda-'+Date.now()+'.jpg' });
+        if(subManiqui.ok) fotoManiquiUrl = subManiqui.url;
+      }
     }
   }
   return {
     ID: uid(), Categoria: it.categoria||'Ropa superior', Tipo: it.tipo||'', Color: it.color||'',
     ColorSecundario: it.colorSecundario||'', Estampado: it.estampado||'', Marca:'', Temporada:'',
-    Formalidad:'', FotoURL: fotoGeneradaUrl||fotoRealUrl||origenUrl||'', FotoGeneradaURL: fotoGeneradaUrl, FotoRealURL: fotoRealUrl, FotoOrigenURL: origenUrl||'', FechaAlta: new Date().toISOString(),
+    Formalidad:'', FotoURL: fotoGeneradaUrl||fotoRealUrl||origenUrl||'', FotoGeneradaURL: fotoGeneradaUrl, FotoRealURL: fotoRealUrl, FotoOrigenURL: origenUrl||'', FotoManiquiURL: fotoManiquiUrl, FechaAlta: new Date().toISOString(),
     UltimoUso:'', VecesUsado:0, Favorito:false, Notas:'', Papelera:false
   };
 }
