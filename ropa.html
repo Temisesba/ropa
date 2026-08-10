@@ -151,7 +151,7 @@ nav.tabbar button .ic{font-size:19px}
       <h2>Subir fotos</h2>
       <p class="hint">Sube fotos donde se vea tu ropa (selfies, outfits, tu clóset). La IA detecta cada prenda por foto y tú confirmas antes de guardar.</p>
       <div class="upload-drop">
-        <input type="file" id="fileInput" accept="image/*" multiple capture="environment" style="display:none" onchange="onFilesSelected(this.files)">
+        <input type="file" id="fileInput" accept="image/*" multiple style="display:none" onchange="onFilesSelected(this.files)">
         <button class="btn" onclick="document.getElementById('fileInput').click()">📷 Elegir fotos</button>
         <p class="hint" style="margin-top:10px">Puedes elegir varias a la vez</p>
       </div>
@@ -177,7 +177,7 @@ nav.tabbar button .ic{font-size:19px}
       <h2>Qué me puse hoy</h2>
       <div class="field"><label class="hint">Evento (opcional)</label><input type="text" id="hoyEvento" placeholder="Trabajo, cita, casual…"></div>
 
-      <input type="file" id="fileInputHoy" accept="image/*" capture="environment" style="display:none" onchange="onFotoHoySeleccionada(this.files)">
+      <input type="file" id="fileInputHoy" accept="image/*" style="display:none" onchange="onFotoHoySeleccionada(this.files)">
       <button class="btn secondary" onclick="document.getElementById('fileInputHoy').click()">📷 Reconocer con una foto</button>
       <p class="hint">Sube una foto de lo que traes puesto — la IA la compara contra tu catálogo, así no se duplica lo que ya tienes.</p>
       <div id="hoyReviewArea"></div>
@@ -219,7 +219,7 @@ nav.tabbar button .ic{font-size:19px}
 
     <section class="screen" id="screen-perfil">
       <h2>Perfil</h2>
-      <input type="file" id="fileInputPerfil" accept="image/*" capture="user" style="display:none" onchange="onFotoPerfilSeleccionada(this.files)">
+      <input type="file" id="fileInputPerfil" accept="image/*" style="display:none" onchange="onFotoPerfilSeleccionada(this.files)">
       <button class="btn secondary" onclick="document.getElementById('fileInputPerfil').click()">📷 Detectar con una foto</button>
       <p class="hint">Sube una foto tuya con buena luz (se te vea la piel) y la IA sugiere tu tono y subtono abajo — tú decides si lo dejas así o lo cambias.</p>
       <p class="hint" id="perfilDetectInfo"></p>
@@ -737,17 +737,13 @@ function renderRevisionHoy(){
       const sugerido = mejorCandidato(it, candidatos);
       it.matchId = sugerido ? sugerido.ID : null;
     }
-    const pickHtml = candidatos.map(p=>`<div class="pick-item ${it.matchId===p.ID?'selected':''}" onclick="seleccionarCandidatoHoy(${i},'${p.ID}')">
-        ${p.FotoURL?`<img src="${p.FotoURL}">`:`<div class="ph">${CATEGORIA_ICONO[p.Categoria]}</div>`}
-        <div>${escAttr(p.Tipo||p.Categoria)}</div>
-      </div>`).join('') +
-      `<div class="pick-item ${it.matchId===null?'selected':''}" onclick="seleccionarCandidatoHoy(${i},null)">
-        <div class="ph nueva">✚</div><div>Nueva</div>
-      </div>`;
     const prendaSugerida = it.matchId ? DATA.prendas.find(p=>p.ID===it.matchId) : null;
-    const avisoDuplicado = prendaSugerida
-      ? `<p class="hint" style="margin:8px 0 4px">🔁 <b>Creemos que ya tienes esta prenda</b> (${escAttr(prendaSugerida.Tipo||prendaSugerida.Categoria)}, ${escAttr(prendaSugerida.Color||'')}) — confirma o elige otra abajo:</p>`
-      : `<p class="hint" style="margin:8px 0 4px">✨ No encontramos ninguna parecida en tu catálogo — se guardará como <b>prenda nueva</b>. ¿Es alguna de estas?</p>`;
+    const estadoMatchHtml = prendaSugerida
+      ? `<div style="display:flex;align-items:center;gap:8px;margin-top:8px;padding:8px;background:var(--accent-soft);border-radius:10px">
+           ${prendaSugerida.FotoURL?`<img src="${prendaSugerida.FotoURL}" style="width:44px;height:44px;object-fit:cover;border-radius:8px;flex:none">`:''}
+           <div style="flex:1;font-size:13px">🔁 Ya la tienes: <b>${escAttr(prendaSugerida.Tipo||prendaSugerida.Categoria)}</b>, ${escAttr(prendaSugerida.Color||'')}<br><span class="hint">se va a registrar el uso sobre esta prenda, no una nueva</span></div>
+         </div>`
+      : `<p class="hint" style="margin-top:8px">✨ Se guardará como <b>prenda nueva</b> (no encontramos ninguna parecida).</p>`;
     cardsHtml += `<div class="detect-card" id="detecthoy-${i}" style="flex-direction:column;align-items:stretch">
       <div style="display:flex;gap:10px">
         <img src="${it.cropPreview||d.dataUrl}" alt="">
@@ -759,8 +755,8 @@ function renderRevisionHoy(){
         </div>
         <button class="remove" onclick="quitarDeteccionHoy(${i})" title="No incluir esta prenda">✕</button>
       </div>
-      ${avisoDuplicado}
-      <div class="pick-list">${pickHtml}</div>
+      ${estadoMatchHtml}
+      <button class="btn ghost" style="margin-top:8px;font-size:12px;padding:6px 10px" onclick="abrirRevisarCategoria(${i})">🔍 Revisar catálogo de ${escAttr(it.categoria)} (${candidatos.length})</button>
     </div>`;
   });
   area.innerHTML = `${badgeModelo}${cardsHtml}
@@ -770,6 +766,34 @@ function renderRevisionHoy(){
     </div>`;
 }
 function seleccionarCandidatoHoy(i, id){ hoyDetections.items[i].matchId = id; renderRevisionHoy(); }
+// Pedido explícito: la sugerencia automática se pasaba de largo fácil —
+// esto obliga a una acción deliberada: abre el catálogo completo de esa
+// categoría en grande, el usuario toca la foto real que reconoce (o
+// "es nueva" si ninguna es), nada queda adivinado en silencio.
+function abrirRevisarCategoria(i){
+  const it = hoyDetections.items[i];
+  const candidatos = candidatosParaPrenda(it.categoria);
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay';
+  overlay.innerHTML = `<div class="modal">
+    <h3>¿Ya tienes esta prenda?</h3>
+    <p class="hint">Toca la foto que sea la misma prenda real, o marca que es nueva.</p>
+    <div class="grid" id="revisarGrid">
+      ${candidatos.length ? candidatos.map(p=>`<div class="card" style="cursor:pointer" onclick="seleccionarCandidatoHoy(${i},'${p.ID}');this.closest('.modal-overlay').remove()">
+        ${p.FotoURL?`<img class="thumb" src="${p.FotoURL}">`:`<div class="thumb ph">${CATEGORIA_ICONO[p.Categoria]||'👕'}</div>`}
+        <div class="body"><div class="tipo">${escAttr(p.Tipo||p.Categoria)}</div><div class="meta">${escAttr(p.Color||'')}</div></div>
+      </div>`).join('') : '<p class="hint">Todavía no tienes prendas guardadas en esta categoría.</p>'}
+    </div>
+    <div class="actions">
+      <button class="btn ghost" id="revisarCancelar">Cerrar</button>
+      <button class="btn secondary" id="revisarEsNueva">✚ Es una prenda nueva</button>
+    </div>
+  </div>`;
+  document.body.appendChild(overlay);
+  overlay.addEventListener('click', e=>{ if(e.target===overlay) overlay.remove(); });
+  overlay.querySelector('#revisarCancelar').onclick = ()=> overlay.remove();
+  overlay.querySelector('#revisarEsNueva').onclick = ()=>{ seleccionarCandidatoHoy(i, null); overlay.remove(); };
+}
 function quitarDeteccionHoy(i){ hoyDetections.items.splice(i,1); renderRevisionHoy(); }
 async function guardarRecortesHoy(){
   const d = hoyDetections;
