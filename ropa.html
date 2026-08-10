@@ -33,7 +33,7 @@ h1,h2,h3{margin:0 0 8px}
 .btn{background:var(--accent);color:#fff;border:none;border-radius:10px;padding:10px 16px;font-weight:600}
 .btn.secondary{background:var(--accent-soft);color:var(--accent)}
 .btn.danger{background:var(--danger);color:#fff}
-.btn.ghost{background:transparent;border:1px solid var(--border)}
+.btn.ghost{background:transparent;border:1px solid var(--border);color:var(--text)}
 .btn:disabled{opacity:.5;cursor:default}
 
 /* header */
@@ -54,7 +54,7 @@ nav.tabbar button .ic{font-size:19px}
 /* cards / grid */
 .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:12px;margin-top:12px}
 .card{background:var(--bg-card);border-radius:var(--radius);box-shadow:var(--shadow);overflow:hidden;display:flex;flex-direction:column}
-.card .thumb{width:100%;aspect-ratio:1;object-fit:cover;background:var(--accent-soft)}
+.card .thumb{width:100%;aspect-ratio:1;object-fit:cover;background:var(--accent-soft);cursor:zoom-in}
 .card .thumb.ph{display:flex;align-items:center;justify-content:center;font-size:36px}
 .card .body{padding:8px 10px 10px}
 .card .tipo{font-weight:600;font-size:14px}
@@ -217,6 +217,10 @@ nav.tabbar button .ic{font-size:19px}
 
     <section class="screen" id="screen-perfil">
       <h2>Perfil</h2>
+      <input type="file" id="fileInputPerfil" accept="image/*" capture="user" style="display:none" onchange="onFotoPerfilSeleccionada(this.files)">
+      <button class="btn secondary" onclick="document.getElementById('fileInputPerfil').click()">📷 Detectar con una foto</button>
+      <p class="hint">Sube una foto tuya con buena luz (se te vea la piel) y la IA sugiere tu tono y subtono abajo — tú decides si lo dejas así o lo cambias.</p>
+      <p class="hint" id="perfilDetectInfo"></p>
       <div class="field"><label class="hint">Tono de piel</label>
         <select id="perfilTono"><option value="">Sin definir</option><option>Claro</option><option>Medio</option><option>Moreno</option><option>Oscuro</option></select>
       </div>
@@ -349,6 +353,15 @@ function confirmarEliminar(mensaje, onConfirmar){
   overlay.querySelector('#cnCancel').onclick = ()=> overlay.remove();
   overlay.addEventListener('click', e=>{ if(e.target===overlay) overlay.remove(); });
   overlay.querySelector('#cnOk').onclick = ()=>{ overlay.remove(); onConfirmar(); };
+}
+
+function verFotoGrande(url){
+  if(!url) return;
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay';
+  overlay.innerHTML = `<img src="${url}" style="max-width:100%;max-height:88vh;border-radius:var(--radius);display:block">`;
+  overlay.addEventListener('click', ()=> overlay.remove());
+  document.body.appendChild(overlay);
 }
 
 // ============================================================
@@ -496,6 +509,15 @@ function confirmarRecorte(){
   onListo({ dataUrl, width: sw, height: sh, base64: dataUrl.split(',')[1], mimeType:'image/jpeg', canvas });
 }
 const NOMBRE_MODELO = { gemini:'Gemini', claude:'Claude' };
+// Un solo mensaje reusado en toda la app para decir con qué IA se
+// trabajó — si Gemini falló específicamente por cuota agotada (no por
+// cualquier otro error) lo dice explícito, en vez de solo mostrar
+// "Claude" como si hubiera sido una elección normal.
+function mensajeModelo(r, verbo){
+  if(!r || !r.modelo) return '';
+  if(r.modelo==='claude' && r.motivoFallback==='cuota') return '⚠️ Gemini se quedó sin créditos gratis por hoy — se usó Claude';
+  return `${verbo} con ${NOMBRE_MODELO[r.modelo]||r.modelo}`;
+}
 async function analizarFotoRecortada(recortada){
   lastCropped = recortada;
   document.getElementById('reviewArea').innerHTML = '<p class="hint">Analizando foto con IA…</p>';
@@ -506,7 +528,7 @@ async function analizarFotoRecortada(recortada){
       <button class="btn" onclick="reintentarFoto()">Reintentar</button>`;
     return;
   }
-  currentDetections = { ...recortada, modelo: r.modelo, items: (r.items||[]).map(it=>({ ...it, incluir:true })) };
+  currentDetections = { ...recortada, modelo: r.modelo, motivoFallback: r.motivoFallback, items: (r.items||[]).map(it=>({ ...it, incluir:true })) };
   document.getElementById('reviewArea').innerHTML = '<p class="hint">Recortando cada prenda…</p>';
   await prepararRecortes(currentDetections);
   renderRevisionFoto();
@@ -601,7 +623,7 @@ function renderRevisionFoto(){
       <button class="remove" onclick="quitarDeteccion(${i})" title="No incluir esta prenda">✕</button>
     </div>`;
   });
-  const badgeModelo = d.modelo ? `<span class="chip" style="cursor:default">🤖 Analizado con ${NOMBRE_MODELO[d.modelo]||d.modelo}</span>` : '';
+  const badgeModelo = d.modelo ? `<span class="chip" style="cursor:default">🤖 ${mensajeModelo(d,'Analizado')}</span>` : '';
   area.innerHTML = `
     <div class="review-photo"><img src="${d.dataUrl}">${boxesHtml}</div>
     <p class="hint" style="margin-top:10px">Revisa y corrige lo que haga falta antes de guardar</p>
@@ -686,7 +708,7 @@ async function analizarFotoParaHoy(recortada){
     return;
   }
   lastCropped = recortada;
-  hoyDetections = { ...recortada, modelo: r.modelo, items: (r.items||[]).map(it=>({ ...it, incluir:true })) };
+  hoyDetections = { ...recortada, modelo: r.modelo, motivoFallback: r.motivoFallback, items: (r.items||[]).map(it=>({ ...it, incluir:true })) };
   document.getElementById('hoyReviewArea').innerHTML = '<p class="hint">Recortando cada prenda…</p>';
   await prepararRecortes(hoyDetections);
   renderRevisionHoy();
@@ -702,7 +724,7 @@ function renderRevisionHoy(){
       <button class="btn secondary" onclick="cancelarRecortarHoy()">Cerrar</button>`;
     return;
   }
-  const badgeModelo = d.modelo ? `<span class="chip" style="cursor:default">🤖 Analizado con ${NOMBRE_MODELO[d.modelo]||d.modelo}</span>` : '';
+  const badgeModelo = d.modelo ? `<span class="chip" style="cursor:default">🤖 ${mensajeModelo(d,'Analizado')}</span>` : '';
   let cardsHtml = '';
   d.items.forEach((it, i)=>{
     const candidatos = candidatosParaPrenda(it.categoria);
@@ -805,7 +827,7 @@ function renderCatalogo(){
   grid.innerHTML = items.map(p=>{
     const dias = diasDesde(p.UltimoUso);
     const usoTxt = p.UltimoUso ? (dias===0?'usada hoy':`hace ${dias} día${dias===1?'':'s'}`) : 'nunca usada';
-    const foto = p.FotoURL ? `<img class="thumb" src="${p.FotoURL}" loading="lazy">` : `<div class="thumb ph">${CATEGORIA_ICONO[p.Categoria]||'👕'}</div>`;
+    const foto = p.FotoURL ? `<img class="thumb" src="${p.FotoURL}" loading="lazy" onclick="verFotoGrande('${p.FotoURL}')">` : `<div class="thumb ph">${CATEGORIA_ICONO[p.Categoria]||'👕'}</div>`;
     return `<div class="card">
       ${foto}
       <div class="body">
@@ -863,6 +885,11 @@ function abrirEditarPrenda(id){
   overlay.className = 'modal-overlay';
   overlay.innerHTML = `<div class="modal">
     <h3>Editar prenda</h3>
+    <div class="field" style="text-align:center">
+      ${p.FotoURL ? `<img id="edFotoPreview" src="${p.FotoURL}" style="max-width:100%;max-height:220px;border-radius:12px;object-fit:contain">
+      <div><button class="btn secondary" id="edRecortar" style="margin-top:8px">✂️ Recortar foto</button></div>` : `<p class="hint">Esta prenda no tiene foto</p>`}
+      <div id="edCropArea"></div>
+    </div>
     <div class="field"><label>Categoría</label><select id="edCat">${CATEGORIAS.map(c=>`<option ${c===p.Categoria?'selected':''}>${c}</option>`).join('')}</select></div>
     <div class="field"><label>Tipo</label><input id="edTipo" value="${escAttr(p.Tipo||'')}"></div>
     <div class="field"><label>Color</label><input id="edColor" value="${escAttr(p.Color||'')}"></div>
@@ -878,6 +905,20 @@ function abrirEditarPrenda(id){
   document.body.appendChild(overlay);
   overlay.addEventListener('click', e=>{ if(e.target===overlay) overlay.remove(); });
   overlay.querySelector('#edCancel').onclick = ()=> overlay.remove();
+  const btnRecortar = overlay.querySelector('#edRecortar');
+  if(btnRecortar) btnRecortar.onclick = async ()=>{
+    const fileId = fileIdDeUrlDrive(p.FotoURL) || fileIdDeUrlDrive(p.FotoOrigenURL);
+    if(!fileId){ showToast('Esta prenda no tiene foto para recortar'); return; }
+    document.getElementById('edCropArea').innerHTML = '<p class="hint">Cargando foto…</p>';
+    const r = await apiPost('descargarImagenDrive', { fileId });
+    if(!r.ok){ document.getElementById('edCropArea').innerHTML = `<p class="hint">No se pudo cargar la foto (${r.error||'sin conexión'}).</p>`; return; }
+    const resized = await imagenDesdeBase64(r.base64, r.mimeType, 1280);
+    mostrarRecorteManual(resized, {
+      containerId: 'edCropArea',
+      onListo: (recortada)=> confirmarRecorteEdicion(p, recortada),
+      onDescartar: ()=>{ cleanupCropListeners(); document.getElementById('edCropArea').innerHTML=''; }
+    });
+  };
   overlay.querySelector('#edGuardar').onclick = async ()=>{
     p.Categoria = overlay.querySelector('#edCat').value;
     p.Tipo = overlay.querySelector('#edTipo').value;
@@ -892,6 +933,46 @@ function abrirEditarPrenda(id){
     localStorage.setItem('ropa_data_cache', JSON.stringify(DATA));
     showToast('Guardado');
   };
+}
+function fileIdDeUrlDrive(url){
+  const m = String(url||'').match(/[?&]id=([^&]+)/);
+  return m ? m[1] : '';
+}
+// Igual que resizeImageFile pero partiendo de un base64 ya en memoria (lo
+// que regresa descargarImagenDrive) en vez de un File del disco — mismo
+// objeto de salida {dataUrl,width,height,base64,mimeType,canvas} para que
+// el recortador (mostrarRecorteManual) no note la diferencia.
+function imagenDesdeBase64(base64, mimeType, maxDim){
+  return new Promise((resolve, reject)=>{
+    const img = new Image();
+    img.onerror = reject;
+    img.onload = ()=>{
+      let w = img.width, h = img.height;
+      if(maxDim && (w > maxDim || h > maxDim)){
+        if(w >= h){ h = Math.round(h*maxDim/w); w = maxDim; } else { w = Math.round(w*maxDim/h); h = maxDim; }
+      }
+      const canvas = document.createElement('canvas');
+      canvas.width = w; canvas.height = h;
+      canvas.getContext('2d').drawImage(img, 0, 0, w, h);
+      const dataUrl = canvas.toDataURL('image/jpeg', 0.9);
+      resolve({ dataUrl, width:w, height:h, base64: dataUrl.split(',')[1], mimeType:'image/jpeg', canvas });
+    };
+    img.src = 'data:'+mimeType+';base64,'+base64;
+  });
+}
+async function confirmarRecorteEdicion(p, recortada){
+  cleanupCropListeners();
+  document.getElementById('edCropArea').innerHTML = '<p class="hint">Guardando recorte…</p>';
+  const subida = await apiPost('uploadImage', { imageBase64: recortada.base64, mimeType: recortada.mimeType, fileName: 'prenda-'+Date.now()+'.jpg' });
+  if(!subida.ok){ document.getElementById('edCropArea').innerHTML = `<p class="hint">No se pudo guardar: ${subida.error||'sin conexión'}</p>`; return; }
+  p.FotoURL = subida.url;
+  await apiPost('saveRow', { table:'PRENDAS', row:p });
+  localStorage.setItem('ropa_data_cache', JSON.stringify(DATA));
+  renderCatalogo();
+  document.getElementById('edCropArea').innerHTML = '';
+  const preview = document.getElementById('edFotoPreview');
+  if(preview) preview.src = subida.url;
+  showToast('Foto actualizada');
 }
 
 // ============================================================
@@ -988,7 +1069,7 @@ async function pedirSugerencias(){
   const r = await apiPost('sugerirOutfit', { evento, clima, tonoPiel: perfil.TonoPiel||'', subtono: perfil.Subtono||'' });
   if(!r.ok){ wrap.innerHTML = `<p class="hint">No se pudo generar sugerencias: ${r.error||'sin conexión'}</p>`; return; }
   if(!r.outfits || !r.outfits.length){ wrap.innerHTML = '<p class="hint">La IA no encontró combinaciones — agrega más prendas al catálogo.</p>'; return; }
-  const badgeModelo = r.modelo ? `<p class="hint">🤖 Sugerido con ${NOMBRE_MODELO[r.modelo]||r.modelo}</p>` : '';
+  const badgeModelo = r.modelo ? `<p class="hint">🤖 ${mensajeModelo(r,'Sugerido')}</p>` : '';
   wrap.innerHTML = badgeModelo + r.outfits.map((o,i)=>{
     const prendas = (o.prendaIds||[]).map(id=>findPrenda(id)).filter(Boolean);
     return `<div class="outfit-card">
@@ -1029,7 +1110,7 @@ function renderOlvidados(){
   if(!olvidadas.length){ grid.innerHTML = '<p class="hint">Todo tu clóset se ha usado recientemente 🎉</p>'; return; }
   grid.innerHTML = olvidadas.map(p=>{
     const dias = diasDesde(p.UltimoUso);
-    const foto = p.FotoURL ? `<img class="thumb" src="${p.FotoURL}" loading="lazy">` : `<div class="thumb ph">${CATEGORIA_ICONO[p.Categoria]||'👕'}</div>`;
+    const foto = p.FotoURL ? `<img class="thumb" src="${p.FotoURL}" loading="lazy" onclick="verFotoGrande('${p.FotoURL}')">` : `<div class="thumb ph">${CATEGORIA_ICONO[p.Categoria]||'👕'}</div>`;
     return `<div class="card">${foto}<div class="body">
       <div class="tipo">${escAttr(p.Tipo||p.Categoria)}</div>
       <div class="meta">${dias===null?'Nunca usada':'Hace '+dias+' días'}</div>
@@ -1061,6 +1142,21 @@ async function guardarPerfil(){
   localStorage.setItem('ropa_data_cache', JSON.stringify(DATA));
   await apiPost('saveRow', { table:'PERFIL', row });
   showToast('Perfil guardado');
+}
+async function onFotoPerfilSeleccionada(fileList){
+  if(!fileList.length) return;
+  const info = document.getElementById('perfilDetectInfo');
+  info.textContent = 'Analizando…';
+  const resized = await resizeImageFile(fileList[0], 1024, 0.85);
+  const r = await apiPost('analizarTono', { imageBase64: resized.base64, mimeType: resized.mimeType });
+  if(!r.ok){ info.textContent = 'No se pudo analizar: '+(r.error||'sin conexión'); return; }
+  const selTono = document.getElementById('perfilTono');
+  const selSub = document.getElementById('perfilSubtono');
+  const matchTono = Array.from(selTono.options).find(o=>o.value && o.value.toLowerCase()===String(r.tonoPiel||'').toLowerCase());
+  const matchSub = Array.from(selSub.options).find(o=>o.value && o.value.toLowerCase()===String(r.subtono||'').toLowerCase());
+  if(matchTono) selTono.value = matchTono.value;
+  if(matchSub) selSub.value = matchSub.value;
+  info.textContent = `🤖 ${mensajeModelo(r,'Detectado')} — ajusta si hace falta y dale "Guardar perfil".`;
 }
 
 // ============================================================
