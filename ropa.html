@@ -553,7 +553,7 @@ function mensajeModelo(r, verbo){
   if(r.modelo==='claude' && r.motivoFallback==='cuota') return '⚠️ Gemini se quedó sin créditos gratis por hoy — se usó Claude';
   return `${verbo} con ${NOMBRE_MODELO[r.modelo]||r.modelo}`;
 }
-async function analizarFotoRecortada(recortada){
+async function analizarFotoRecortada(recortada, origenUrlExistente){
   lastCropped = recortada;
   document.getElementById('reviewArea').innerHTML = '<p class="hint">Analizando foto con IA…</p>';
   const r = await apiPost('extraerPrendas', { imageBase64: recortada.base64, mimeType: recortada.mimeType });
@@ -563,10 +563,30 @@ async function analizarFotoRecortada(recortada){
       <button class="btn" onclick="reintentarFoto()">Reintentar</button>`;
     return;
   }
-  currentDetections = { ...recortada, modelo: r.modelo, motivoFallback: r.motivoFallback, items: (r.items||[]).map(it=>({ ...it, incluir:true })) };
+  currentDetections = { ...recortada, modelo: r.modelo, motivoFallback: r.motivoFallback, origenUrlExistente, items: (r.items||[]).map(it=>({ ...it, incluir:true })) };
   document.getElementById('reviewArea').innerHTML = '<p class="hint">Recortando cada prenda…</p>';
   await prepararRecortes(currentDetections);
   renderRevisionFoto();
+}
+// "🔍 Analizar" en Perfil → Fotos subidas: vuelve a mandar por el mismo
+// flujo de "Subir fotos" (recortar, detectar, revisar) una foto que YA
+// está en Drive, sin tener que volver a elegirla desde la galería del
+// celular ni subirla otra vez.
+async function analizarFotoOrigenExistente(url){
+  const fileId = fileIdDeUrlDrive(url);
+  if(!fileId){ showToast('No se pudo identificar esta foto'); return; }
+  showToast('Cargando foto…');
+  const r = await apiPost('descargarImagenDrive', { fileId });
+  if(!r.ok){ showToast('No se pudo cargar: '+(r.error||'sin conexión')); return; }
+  const resized = await imagenDesdeBase64(r.base64, r.mimeType, 1280);
+  uploadQueue = []; uploadIndex = 0;
+  document.getElementById('uploadProgressWrap').classList.add('hidden');
+  switchTab('subir');
+  mostrarRecorteManual(resized, {
+    containerId: 'reviewArea',
+    onListo: (recortada)=> analizarFotoRecortada(recortada, url),
+    onDescartar: ()=>{ cleanupCropListeners(); document.getElementById('reviewArea').innerHTML=''; }
+  });
 }
 // Prepara de antemano el recorte que se va a mostrar Y guardar de cada
 // prenda detectada — así renderRevisionFoto solo lee it.cropPreview en
@@ -693,8 +713,15 @@ async function guardarDetecciones(){
   if(!d.items.length){ omitirFoto(); return; }
   const btn = document.getElementById('btnGuardarPrendas');
   if(btn){ btn.disabled = true; btn.textContent = 'Guardando…'; }
-  const origen = await apiPost('uploadImage', { imageBase64: d.base64, mimeType: d.mimeType, fileName: 'foto-'+Date.now()+'.jpg' });
-  const origenUrl = origen.ok ? origen.url : '';
+  // Si venimos de "Analizar" sobre una foto ya subida (Perfil → Fotos
+  // subidas), reusamos su URL en vez de volver a subirla — sería la
+  // misma foto duplicada en Drive por gusto.
+  let origenUrl = d.origenUrlExistente || '';
+  if(!origenUrl){
+    const origen = await apiPost('uploadImage', { imageBase64: d.base64, mimeType: d.mimeType, fileName: 'foto-'+Date.now()+'.jpg' });
+    origenUrl = origen.ok ? origen.url : '';
+  }
+  if(origenUrl) await registrarFotoOrigenSiFalta(origenUrl);
   // Una sola fecha para TODA la foto (todas las prendas de esa foto se
   // usaron el mismo día, sea cual sea) — sin fecha, registrarUso solo
   // cuenta, no toca UltimoUso. Esto también aplica a las prendas NUEVAS:
@@ -885,6 +912,7 @@ async function guardarRecortesHoy(){
   // existieran, para poder ver después "las fotos de cuando la usé".
   const origen = await apiPost('uploadImage', { imageBase64: d.base64, mimeType: d.mimeType, fileName: 'foto-hoy-'+Date.now()+'.jpg' });
   const origenUrl = origen.ok ? origen.url : '';
+  if(origenUrl) await registrarFotoOrigenSiFalta(origenUrl);
   const prendaIds = [];
   for(const it of d.items){
     if(it.matchId){ prendaIds.push(it.matchId); continue; }
@@ -1007,11 +1035,6 @@ function formatoFechaUso(fecha){
   const d = new Date(fecha);
   if(isNaN(d.getTime())) return 'fecha desconocida';
   return d.toLocaleDateString('es-MX', {day:'numeric', month:'short'});
-}
-function fechaFotoOrigen(url){
-  if(!url) return '';
-  const f = DATA.fotos_origen.find(x=>x.URL===url);
-  return f ? f.Fecha : '';
 }
 // Ya no hace falta inyectar una entrada sintética "(original)": desde
 // que Subir fotos registra un uso real (con o sin fecha) tanto para
@@ -1605,33 +1628,30 @@ function renderPerfilScreen(){
   document.getElementById('perfilConexionInfo').innerHTML = `${DATA.prendas.length} prendas en tu catálogo` + (SHEET_URL ? ` · <a href="${SHEET_URL}" target="_blank" rel="noopener">ver mi hoja de datos</a>` : '');
   renderFotosSubidas();
 }
-// Una "foto subida" = todas las prendas activas que comparten la misma
-// FotoOrigenURL (varias prendas suelen salir de la misma foto). Se
-// administra aquí en vez de por prenda porque la fecha/el borrado deben
-// verse igual en todas las prendas de esa foto, no una por una.
-function fotosOrigenAgrupadas(){
-  const grupos = {};
-  DATA.prendas.filter(p=>p.FotoOrigenURL && !esVerdadero(p.Papelera)).forEach(p=>{
-    (grupos[p.FotoOrigenURL] = grupos[p.FotoOrigenURL] || []).push(p);
-  });
-  return grupos;
+// Se lista desde DATA.fotos_origen (persistente) y NO derivado de las
+// prendas activas — si borras todas las prendas de una foto, la foto
+// sigue apareciendo aquí (con "Analizar" para volver a generar prendas
+// desde ella sin tener que subirla otra vez desde el celular).
+async function registrarFotoOrigenSiFalta(url){
+  if(!url || DATA.fotos_origen.find(x=>x.URL===url)) return;
+  const row = { ID: uid(), URL: url, Fecha: '' };
+  DATA.fotos_origen.push(row);
+  await apiPost('saveRow', { table:'FOTOS_ORIGEN', row });
 }
 function renderFotosSubidas(){
   const cont = document.getElementById('fotosSubidasArea');
-  const grupos = fotosOrigenAgrupadas();
-  const urls = Object.keys(grupos);
-  if(!urls.length){ cont.innerHTML = '<p class="hint">Todavía no hay fotos de origen guardadas.</p>'; return; }
-  cont.innerHTML = urls.map(url=>{
-    const prendas = grupos[url];
-    const fecha = fechaFotoOrigen(url);
-    const fechaInput = fecha && !isNaN(new Date(fecha).getTime()) ? new Date(fecha).toISOString().slice(0,10) : '';
-    return `<div class="detect-card" style="align-items:flex-start">
-      <img src="${url}" onclick="verFotoGrande('${url}')" style="width:64px;height:64px;object-fit:cover;border-radius:8px;cursor:zoom-in;flex:none">
+  if(!DATA.fotos_origen.length){ cont.innerHTML = '<p class="hint">Todavía no hay fotos de origen guardadas.</p>'; return; }
+  cont.innerHTML = DATA.fotos_origen.map(f=>{
+    const prendas = DATA.prendas.filter(p=>p.FotoOrigenURL===f.URL && !esVerdadero(p.Papelera));
+    const fechaInput = f.Fecha && !isNaN(new Date(f.Fecha).getTime()) ? new Date(f.Fecha).toISOString().slice(0,10) : '';
+    return `<div class="detect-card" style="align-items:flex-start;flex-wrap:wrap">
+      <img src="${f.URL}" onclick="verFotoGrande('${f.URL}')" style="width:64px;height:64px;object-fit:cover;border-radius:8px;cursor:zoom-in;flex:none">
       <div class="fields" style="grid-template-columns:1fr;flex:1">
-        <div class="hint">${prendas.map(p=>escAttr(p.Tipo||p.Categoria)).join(', ')}</div>
-        <input type="date" value="${fechaInput}" onchange="guardarFechaFotoOrigen('${url}',this.value)">
+        <div class="hint">${prendas.length ? prendas.map(p=>escAttr(p.Tipo||p.Categoria)).join(', ') : 'Sin prendas activas de esta foto'}</div>
+        <input type="date" value="${fechaInput}" onchange="guardarFechaFotoOrigen('${f.URL}',this.value)">
       </div>
-      <button class="remove" onclick="pedirEliminarFotoOrigen('${url}')" title="Quitar esta foto de tus prendas">🗑</button>
+      <button class="btn ghost" style="font-size:12px;padding:6px 10px" onclick="analizarFotoOrigenExistente('${f.URL}')">🔍 Analizar</button>
+      <button class="remove" onclick="pedirEliminarFotoOrigen('${f.URL}')" title="Quitar esta foto">🗑</button>
     </div>`;
   }).join('');
 }
