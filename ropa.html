@@ -108,6 +108,19 @@ nav.tabbar button .ic{font-size:19px}
 .crop-handle[data-corner="sw"]{left:0;top:100%;cursor:nesw-resize}
 .crop-handle[data-corner="se"]{left:100%;top:100%;cursor:nwse-resize}
 
+/* tablero de outfit (maniquí virtual) */
+.maniqui-wrap{display:flex;flex-direction:column;align-items:center;max-width:240px;margin:16px auto 8px}
+.maniqui-slot{position:relative;width:220px;display:flex;align-items:center;justify-content:center;background:var(--bg-card);border-radius:12px;touch-action:pan-y}
+.maniqui-slot img{max-width:88%;max-height:100%;object-fit:contain}
+.maniqui-slot .ph{font-size:32px;color:var(--text-soft)}
+.maniqui-slot.superior{height:190px;margin-bottom:-24px;z-index:3}
+.maniqui-slot.inferior{height:170px;margin-bottom:-16px;z-index:2}
+.maniqui-slot.calzado{height:100px;z-index:1}
+.maniqui-etiqueta{position:absolute;bottom:4px;left:50%;transform:translateX(-50%);font-size:11px;background:rgba(0,0,0,.55);color:#fff;padding:2px 8px;border-radius:999px;white-space:nowrap;max-width:90%;overflow:hidden;text-overflow:ellipsis}
+.maniqui-arrow{position:absolute;top:50%;transform:translateY(-50%);width:32px;height:32px;border-radius:50%;background:var(--bg-card);border:1px solid var(--border);font-size:16px;z-index:6;box-shadow:var(--shadow)}
+.maniqui-arrow.left{left:-10px}
+.maniqui-arrow.right{right:-10px}
+
 /* outfits */
 .outfit-card{background:var(--bg-card);border-radius:var(--radius);box-shadow:var(--shadow);padding:14px;margin-top:12px}
 .outfit-items{display:flex;gap:8px;overflow-x:auto;margin:10px 0}
@@ -210,6 +223,9 @@ nav.tabbar button .ic{font-size:19px}
       </div>
       <button class="btn" onclick="pedirSugerencias()">✨ Pedir sugerencias</button>
       <div id="sugResultados"></div>
+
+      <button class="btn secondary" style="margin-top:22px" onclick="toggleTableroOutfit()" id="btnTablero">👗 Armar outfit a mano</button>
+      <div id="tableroOutfitArea" class="hidden"></div>
     </section>
 
     <section class="screen" id="screen-olvidados">
@@ -949,6 +965,7 @@ function abrirEditarPrenda(id){
     <div class="field" style="text-align:center">
       ${p.FotoURL ? `<img id="edFotoPreview" src="${p.FotoURL}" style="max-width:100%;max-height:220px;border-radius:12px;object-fit:contain">` : `<p class="hint">Esta prenda no tiene foto</p>`}
       <div id="edFotoBotones" style="display:flex;gap:6px;flex-wrap:wrap;justify-content:center;margin-top:8px">${botonesFotoHtml(p)}</div>
+      <input type="text" id="edFeedback" placeholder="¿Algo que corregir? ej: sin cinto, mangas largas" style="margin-top:8px">
       <input type="file" id="edFileTienda" accept="image/*" style="display:none">
       ${p.FotoOrigenURL ? `<p class="hint" style="margin-top:6px"><a href="#" onclick="event.preventDefault();verFotoGrande('${p.FotoOrigenURL}')">ver foto original completa</a></p>` : ''}
       <div id="edCropArea"></div>
@@ -1056,9 +1073,11 @@ async function regenerarFotoPrenda(p){
   if(btn){ btn.disabled = true; btn.textContent = 'Generando…'; }
   const r = await apiPost('descargarImagenDrive', { fileId });
   if(!r.ok){ showToast('No se pudo cargar la foto: '+(r.error||'sin conexión')); if(btn){ btn.disabled=false; btn.textContent='🔄 Regenerar'; } return; }
+  const feedbackEl = document.getElementById('edFeedback');
+  const feedback = feedbackEl ? feedbackEl.value.trim() : '';
   const gen = await apiPost('generarFotoCatalogo', {
     imageBase64: r.base64, mimeType: r.mimeType,
-    categoria: p.Categoria, tipo: p.Tipo, color: p.Color, colorSecundario: p.ColorSecundario, estampado: p.Estampado
+    categoria: p.Categoria, tipo: p.Tipo, color: p.Color, colorSecundario: p.ColorSecundario, estampado: p.Estampado, feedback
   });
   if(!gen.ok){ showToast('No se pudo generar: '+(gen.error||'')); if(btn){ btn.disabled=false; btn.textContent='🔄 Regenerar'; } return; }
   const subGen = await apiPost('uploadImage', { imageBase64: gen.imageBase64, mimeType: gen.mimeType||'image/jpeg', fileName:'catalogo-'+Date.now()+'.jpg' });
@@ -1069,6 +1088,7 @@ async function regenerarFotoPrenda(p){
   localStorage.setItem('ropa_data_cache', JSON.stringify(DATA));
   renderCatalogo();
   refrescarFotoModal(p);
+  if(feedbackEl) feedbackEl.value = '';
   showToast('Foto regenerada');
 }
 function fileIdDeUrlDrive(url){
@@ -1235,6 +1255,109 @@ async function usarOutfitHoy(prendaIds){
     localStorage.setItem('ropa_data_cache', JSON.stringify(DATA));
     showToast('Registrado como lo que usaste hoy');
   } else showToast('No se pudo registrar: '+(r.error||'sin conexión'));
+}
+
+// ============================================================
+//  Tablero de outfit — "maniquí virtual": el usuario arma su outfit a
+//  mano deslizando o con flechas para cambiar cada pieza, viendo el
+//  conjunto acomodado como si alguien invisible lo trajera puesto
+//  (las fotos generadas ya vienen pensadas para esto, ver
+//  SILUETA_POR_CATEGORIA en el backend). Accesorios/bolsos/abrigos van
+//  aparte, como capas opcionales que se prenden/apagan.
+// ============================================================
+let outfitBoard = null; // { superior:id|null, inferior:id|null, calzado:id|null, extras:Set }
+function itemsParaSlot(slot){
+  const activos = DATA.prendas.filter(p=>!esVerdadero(p.Papelera));
+  if(slot==='superior') return activos.filter(p=>p.Categoria==='Ropa superior'||p.Categoria==='Vestidos');
+  if(slot==='inferior') return activos.filter(p=>p.Categoria==='Ropa inferior');
+  if(slot==='calzado') return activos.filter(p=>p.Categoria==='Calzado');
+  return [];
+}
+function itemsParaExtras(){
+  return DATA.prendas.filter(p=>!esVerdadero(p.Papelera) && ['Accesorios','Bolsos','Abrigos'].includes(p.Categoria));
+}
+function toggleTableroOutfit(){
+  const area = document.getElementById('tableroOutfitArea');
+  const abrir = area.classList.contains('hidden');
+  area.classList.toggle('hidden');
+  document.getElementById('btnTablero').textContent = abrir ? '👗 Ocultar armador' : '👗 Armar outfit a mano';
+  if(abrir){
+    if(!outfitBoard){
+      outfitBoard = { superior:null, inferior:null, calzado:null, extras:new Set() };
+      ['superior','inferior','calzado'].forEach(slot=>{
+        const items = itemsParaSlot(slot);
+        if(items.length) outfitBoard[slot] = items[0].ID;
+      });
+    }
+    renderTableroOutfit();
+  }
+}
+function cambiarSlot(slot, delta){
+  const items = itemsParaSlot(slot);
+  if(!items.length) return;
+  const idxActual = items.findIndex(p=>p.ID===outfitBoard[slot]);
+  const idxNuevo = idxActual<0 ? 0 : (idxActual+delta+items.length)%items.length;
+  outfitBoard[slot] = items[idxNuevo].ID;
+  renderTableroOutfit();
+}
+function toggleExtraOutfit(id){
+  if(outfitBoard.extras.has(id)) outfitBoard.extras.delete(id); else outfitBoard.extras.add(id);
+  renderTableroOutfit();
+}
+function slotHtml(slot, clase){
+  const items = itemsParaSlot(slot);
+  const p = items.find(x=>x.ID===outfitBoard[slot]);
+  if(!items.length){
+    return `<div class="maniqui-slot ${clase}"><span class="ph hint">sin prendas aquí</span></div>`;
+  }
+  const contenido = p
+    ? (p.FotoURL ? `<img src="${p.FotoURL}"><span class="maniqui-etiqueta">${escAttr(p.Tipo||p.Categoria)}</span>` : `<span class="ph">${CATEGORIA_ICONO[p.Categoria]||'👕'}</span>`)
+    : `<span class="ph hint">✕ ninguna</span>`;
+  return `<div class="maniqui-slot ${clase}" data-slot="${slot}">
+    ${items.length>1?`<button class="maniqui-arrow left" onclick="cambiarSlot('${slot}',-1)">‹</button>`:''}
+    ${contenido}
+    ${items.length>1?`<button class="maniqui-arrow right" onclick="cambiarSlot('${slot}',1)">›</button>`:''}
+  </div>`;
+}
+function renderTableroOutfit(){
+  const area = document.getElementById('tableroOutfitArea');
+  // Si la parte de arriba es un vestido, no tiene sentido mostrar/usar
+  // la de abajo — se oculta ese slot en vez de dejarlo ahí sin efecto.
+  const superiorActual = DATA.prendas.find(p=>p.ID===outfitBoard.superior);
+  const esVestido = superiorActual && superiorActual.Categoria==='Vestidos';
+  const extras = itemsParaExtras();
+  area.innerHTML = `
+    <p class="hint" style="text-align:center">Desliza o usa las flechas para cambiar cada pieza</p>
+    <div class="maniqui-wrap">
+      ${slotHtml('superior','superior')}
+      ${esVestido ? '' : slotHtml('inferior','inferior')}
+      ${slotHtml('calzado','calzado')}
+    </div>
+    ${extras.length ? `<p class="hint" style="margin-top:10px">Agregar (opcional):</p>
+    <div class="chips" style="flex-wrap:wrap">${extras.map(p=>`<button class="chip ${outfitBoard.extras.has(p.ID)?'active':''}" onclick="toggleExtraOutfit('${p.ID}')">${CATEGORIA_ICONO[p.Categoria]} ${escAttr(p.Tipo||p.Categoria)}</button>`).join('')}</div>` : ''}
+    <button class="btn" style="margin-top:14px" onclick="usarTableroOutfitHoy()">Usar este outfit hoy</button>
+  `;
+  ['superior','inferior','calzado'].forEach(slot=>{
+    const el = area.querySelector(`.maniqui-slot[data-slot="${slot}"]`);
+    if(el) habilitarSwipeSlot(el, slot);
+  });
+}
+function habilitarSwipeSlot(el, slot){
+  let inicioX = null;
+  el.addEventListener('touchstart', e=>{ inicioX = e.touches[0].clientX; }, { passive:true });
+  el.addEventListener('touchend', e=>{
+    if(inicioX===null) return;
+    const dx = e.changedTouches[0].clientX - inicioX;
+    if(Math.abs(dx) > 40) cambiarSlot(slot, dx<0 ? 1 : -1);
+    inicioX = null;
+  }, { passive:true });
+}
+async function usarTableroOutfitHoy(){
+  const superiorActual = DATA.prendas.find(p=>p.ID===outfitBoard.superior);
+  const esVestido = superiorActual && superiorActual.Categoria==='Vestidos';
+  const prendaIds = [outfitBoard.superior, esVestido?null:outfitBoard.inferior, outfitBoard.calzado, ...outfitBoard.extras].filter(Boolean);
+  if(!prendaIds.length){ showToast('Elige al menos una prenda'); return; }
+  await usarOutfitHoy(prendaIds);
 }
 
 // ============================================================
