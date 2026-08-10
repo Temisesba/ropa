@@ -34,6 +34,7 @@ h1,h2,h3{margin:0 0 8px}
 .btn.secondary{background:var(--accent-soft);color:var(--accent)}
 .btn.danger{background:var(--danger);color:#fff}
 .btn.ghost{background:transparent;border:1px solid var(--border);color:var(--text)}
+.btn.ghost.active{background:var(--accent);border-color:var(--accent);color:#fff}
 .btn:disabled{opacity:.5;cursor:default}
 
 /* header */
@@ -165,6 +166,7 @@ nav.tabbar button .ic{font-size:19px}
       <h2>Catálogo</h2>
       <div class="searchbar">
         <input type="search" id="catSearch" placeholder="Buscar por tipo, color, marca…" oninput="renderCatalogo()">
+        <button class="btn ghost" onclick="toggleFavoritos()" id="btnFav">⭐ Favoritos</button>
         <button class="btn ghost" onclick="toggleTrash()" id="btnTrash">🗑</button>
       </div>
       <div class="chips" id="catChips"></div>
@@ -254,6 +256,7 @@ let GAS_URL = localStorage.getItem('ropa_gas_url') || '';
 let SHEET_URL = '';
 let DATA = { prendas: [], usos: [], outfits_sugeridos: [], perfil: [] };
 let showTrash = false;
+let soloFavoritos = false;
 let activeCategoria = 'Todas';
 
 const CATEGORIAS = ['Calzado','Ropa superior','Ropa inferior','Vestidos','Abrigos','Accesorios','Bolsos','Ropa interior','Deportiva'];
@@ -808,6 +811,7 @@ async function guardarRecortesHoy(){
 //  Catálogo
 // ============================================================
 function toggleTrash(){ showTrash = !showTrash; document.getElementById('btnTrash').classList.toggle('active', showTrash); renderCatalogo(); }
+function toggleFavoritos(){ soloFavoritos = !soloFavoritos; renderCatalogo(); }
 function diasDesde(fechaISO){
   if(!fechaISO) return null;
   const ms = Date.now() - new Date(fechaISO).getTime();
@@ -818,12 +822,17 @@ function renderCatalogo(){
   chips.innerHTML = ['Todas', ...CATEGORIAS].map(c=>
     `<button class="chip ${c===activeCategoria?'active':''}" onclick="activeCategoria='${c}';renderCatalogo()">${c==='Todas'?'Todas':CATEGORIA_ICONO[c]+' '+c}</button>`
   ).join('');
+  document.getElementById('btnFav').classList.toggle('active', soloFavoritos);
   const q = (document.getElementById('catSearch').value||'').toLowerCase();
   let items = DATA.prendas.filter(p=> esVerdadero(p.Papelera) === showTrash);
   if(activeCategoria!=='Todas') items = items.filter(p=>p.Categoria===activeCategoria);
+  if(soloFavoritos) items = items.filter(p=>esVerdadero(p.Favorito));
   if(q) items = items.filter(p=> [p.Tipo,p.Color,p.Marca,p.ColorSecundario].join(' ').toLowerCase().includes(q));
   const grid = document.getElementById('catGrid');
-  if(!items.length){ grid.innerHTML = `<p class="hint">${showTrash?'La papelera está vacía.':'Todavía no hay prendas aquí — sube fotos para empezar.'}</p>`; return; }
+  if(!items.length){
+    const vacioMsg = showTrash ? 'La papelera está vacía.' : soloFavoritos ? 'Todavía no marcaste ninguna prenda como favorita.' : 'Todavía no hay prendas aquí — sube fotos para empezar.';
+    grid.innerHTML = `<p class="hint">${vacioMsg}</p>`; return;
+  }
   grid.innerHTML = items.map(p=>{
     const dias = diasDesde(p.UltimoUso);
     const usoTxt = p.UltimoUso ? (dias===0?'usada hoy':`hace ${dias} día${dias===1?'':'s'}`) : 'nunca usada';
@@ -888,6 +897,7 @@ function abrirEditarPrenda(id){
     <div class="field" style="text-align:center">
       ${p.FotoURL ? `<img id="edFotoPreview" src="${p.FotoURL}" style="max-width:100%;max-height:220px;border-radius:12px;object-fit:contain">
       <div><button class="btn secondary" id="edRecortar" style="margin-top:8px">✂️ Recortar foto</button></div>` : `<p class="hint">Esta prenda no tiene foto</p>`}
+      ${p.FotoOrigenURL && p.FotoOrigenURL!==p.FotoURL ? `<p class="hint" style="margin-top:6px"><a href="#" onclick="event.preventDefault();verFotoGrande('${p.FotoOrigenURL}')">ver foto original completa</a></p>` : ''}
       <div id="edCropArea"></div>
     </div>
     <div class="field"><label>Categoría</label><select id="edCat">${CATEGORIAS.map(c=>`<option ${c===p.Categoria?'selected':''}>${c}</option>`).join('')}</select></div>
