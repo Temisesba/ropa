@@ -119,6 +119,9 @@ nav.tabbar button .ic{font-size:19px}
 .pick-item{flex:none;width:76px;text-align:center;font-size:11px;cursor:pointer}
 .pick-item img{width:76px;height:76px;object-fit:cover;border-radius:10px;border:3px solid transparent}
 .pick-item.selected img{border-color:var(--accent)}
+.pick-item.selected{outline:3px solid var(--accent);border-radius:10px}
+.pick-item .ph{width:76px;height:76px;border-radius:10px;background:var(--accent-soft);display:flex;align-items:center;justify-content:center;font-size:26px}
+.pick-item .ph.nueva{border:2px dashed var(--accent);background:transparent}
 </style>
 </head>
 <body>
@@ -171,6 +174,13 @@ nav.tabbar button .ic{font-size:19px}
     <section class="screen" id="screen-hoy">
       <h2>Qué me puse hoy</h2>
       <div class="field"><label class="hint">Evento (opcional)</label><input type="text" id="hoyEvento" placeholder="Trabajo, cita, casual…"></div>
+
+      <input type="file" id="fileInputHoy" accept="image/*" capture="environment" style="display:none" onchange="onFotoHoySeleccionada(this.files)">
+      <button class="btn secondary" onclick="document.getElementById('fileInputHoy').click()">📷 Reconocer con una foto</button>
+      <p class="hint">Sube una foto de lo que traes puesto — la IA la compara contra tu catálogo, así no se duplica lo que ya tienes.</p>
+      <div id="hoyReviewArea"></div>
+
+      <p class="hint" style="margin-top:18px">…o elige a mano:</p>
       <div id="hoyPickGroups"></div>
       <button class="btn" style="margin-top:14px" onclick="guardarUsoHoy()">Guardar</button>
       <h3 style="margin-top:26px">Registros recientes</h3>
@@ -393,7 +403,7 @@ async function procesarSiguienteFoto(){
   actualizarProgreso();
   document.getElementById('reviewArea').innerHTML = '<p class="hint">Cargando foto…</p>';
   const resized = await resizeImageFile(uploadQueue[uploadIndex], 1280, 0.85);
-  mostrarRecorteManual(resized);
+  mostrarRecorteManual(resized, { containerId:'reviewArea', onListo: analizarFotoRecortada, onDescartar: omitirFoto });
 }
 function omitirFoto(){ cleanupCropListeners(); uploadIndex++; procesarSiguienteFoto(); }
 function reintentarFoto(){ if(lastCropped) analizarFotoRecortada(lastCropped); else procesarSiguienteFoto(); }
@@ -401,13 +411,15 @@ function reintentarFoto(){ if(lastCropped) analizarFotoRecortada(lastCropped); e
 // ── Recorte manual antes de analizar: la IA solo ve lo que el usuario
 // deja dentro del cuadro (pedido explícito: no mandar la foto completa
 // sin que él decida qué parte analizar). Cuadro arrastrable/redimensionable
-// con eventos pointer (funciona con mouse y con dedo).
+// con eventos pointer (funciona con mouse y con dedo). Reutilizable: se le
+// pasa en qué contenedor dibujarse y qué hacer al terminar, para servir
+// tanto al flujo de "Subir fotos" (catálogo) como al de "Hoy" (reconocer).
 let cropState = null;
 let lastCropped = null;
 function clamp(v,min,max){ return Math.min(max, Math.max(min, v)); }
-function mostrarRecorteManual(resized){
-  cropState = { resized, rect: { x:0.08, y:0.08, w:0.84, h:0.84 }, mode:null, startPointer:null, startRect:null };
-  document.getElementById('reviewArea').innerHTML = `
+function mostrarRecorteManual(resized, { containerId, onListo, onDescartar }){
+  cropState = { resized, containerId, onListo, onDescartar, rect: { x:0.08, y:0.08, w:0.84, h:0.84 }, mode:null, startPointer:null, startRect:null };
+  document.getElementById(containerId).innerHTML = `
     <p class="hint">Recorta la foto para que la IA solo analice lo que dejes dentro del cuadro.</p>
     <div class="crop-wrap" id="cropWrap">
       <img id="cropImg" src="${resized.dataUrl}" draggable="false">
@@ -419,7 +431,7 @@ function mostrarRecorteManual(resized){
       </div>
     </div>
     <div style="display:flex;gap:8px;margin-top:14px;flex-wrap:wrap">
-      <button class="btn secondary" onclick="omitirFoto()">Descartar foto</button>
+      <button class="btn secondary" onclick="cropState.onDescartar()">Descartar foto</button>
       <button class="btn ghost" onclick="usarFotoCompleta()">Usar foto completa</button>
       <button class="btn" onclick="confirmarRecorte()">Recortar y analizar</button>
     </div>`;
@@ -466,11 +478,12 @@ function cleanupCropListeners(){
   window.removeEventListener('pointerup', onCropPointerUp);
 }
 function usarFotoCompleta(){
+  const onListo = cropState.onListo;
   cleanupCropListeners();
-  analizarFotoRecortada(cropState.resized);
+  onListo(cropState.resized);
 }
 function confirmarRecorte(){
-  const { resized, rect } = cropState;
+  const { resized, rect, onListo } = cropState;
   cleanupCropListeners();
   const sx = Math.round(rect.x * resized.width);
   const sy = Math.round(rect.y * resized.height);
@@ -480,8 +493,9 @@ function confirmarRecorte(){
   canvas.width = sw; canvas.height = sh;
   canvas.getContext('2d').drawImage(resized.canvas, sx, sy, sw, sh, 0, 0, sw, sh);
   const dataUrl = canvas.toDataURL('image/jpeg', 0.85);
-  analizarFotoRecortada({ dataUrl, width: sw, height: sh, base64: dataUrl.split(',')[1], mimeType:'image/jpeg', canvas });
+  onListo({ dataUrl, width: sw, height: sh, base64: dataUrl.split(',')[1], mimeType:'image/jpeg', canvas });
 }
+const NOMBRE_MODELO = { gemini:'Gemini', claude:'Claude' };
 async function analizarFotoRecortada(recortada){
   lastCropped = recortada;
   document.getElementById('reviewArea').innerHTML = '<p class="hint">Analizando foto con IA…</p>';
@@ -492,8 +506,71 @@ async function analizarFotoRecortada(recortada){
       <button class="btn" onclick="reintentarFoto()">Reintentar</button>`;
     return;
   }
-  currentDetections = { ...recortada, items: (r.items||[]).map(it=>({ ...it, incluir:true })) };
+  currentDetections = { ...recortada, modelo: r.modelo, items: (r.items||[]).map(it=>({ ...it, incluir:true })) };
+  document.getElementById('reviewArea').innerHTML = '<p class="hint">Recortando cada prenda…</p>';
+  await prepararRecortes(currentDetections);
   renderRevisionFoto();
+}
+// Prepara de antemano el recorte que se va a mostrar Y guardar de cada
+// prenda detectada — así renderRevisionFoto solo lee it.cropPreview en
+// vez de recalcular el recorte cada vez que se re-dibuja la pantalla.
+async function prepararRecortes(d){
+  for(const it of d.items){
+    if(!it.caja){ it.cropPreview = d.dataUrl; continue; }
+    it.cropPreview = it.mask
+      ? await recorteConMascara(d.canvas, d.width, d.height, it.caja, it.mask)
+      : cropDataUrl(d.canvas, d.width, d.height, it.caja);
+  }
+}
+// Si Gemini devolvió una máscara de segmentación para la prenda, la usa
+// como "alfa" sobre el recorte real para dejar solo la prenda visible
+// sobre fondo blanco (estilo catálogo de tienda). La máscara puede venir
+// en cualquier resolución — se estira al tamaño del recorte antes de
+// leer su brillo, así no depende de qué tamaño exacto haya mandado la IA.
+// Si algo falla (máscara inválida, etc.) cae al recorte normal sin quitar
+// fondo — nunca rompe el flujo.
+function recorteConMascara(sourceCanvas, width, height, caja, maskBase64){
+  return new Promise(resolve=>{
+    const fallback = ()=> resolve(cropDataUrl(sourceCanvas, width, height, caja));
+    const [ymin,xmin,ymax,xmax] = caja;
+    const sx = Math.max(0, Math.round(xmin/1000*width));
+    const sy = Math.max(0, Math.round(ymin/1000*height));
+    const sw = Math.max(1, Math.round((xmax-xmin)/1000*width));
+    const sh = Math.max(1, Math.round((ymax-ymin)/1000*height));
+    const maskImg = new Image();
+    maskImg.onerror = fallback;
+    maskImg.onload = ()=>{
+      try{
+        const cropCanvas = document.createElement('canvas');
+        cropCanvas.width = sw; cropCanvas.height = sh;
+        const cropCtx = cropCanvas.getContext('2d');
+        cropCtx.drawImage(sourceCanvas, sx, sy, sw, sh, 0, 0, sw, sh);
+        const cropData = cropCtx.getImageData(0, 0, sw, sh).data;
+
+        const maskCanvas = document.createElement('canvas');
+        maskCanvas.width = sw; maskCanvas.height = sh;
+        const maskCtx = maskCanvas.getContext('2d');
+        maskCtx.drawImage(maskImg, 0, 0, sw, sh);
+        const maskData = maskCtx.getImageData(0, 0, sw, sh).data;
+
+        const outCanvas = document.createElement('canvas');
+        outCanvas.width = sw; outCanvas.height = sh;
+        const outCtx = outCanvas.getContext('2d');
+        const outImg = outCtx.createImageData(sw, sh);
+        for(let i=0; i<cropData.length; i+=4){
+          const alpha = maskData[i]/255; // máscara en gris: r=g=b=brillo
+          outImg.data[i]   = Math.round(cropData[i]*alpha   + 255*(1-alpha));
+          outImg.data[i+1] = Math.round(cropData[i+1]*alpha + 255*(1-alpha));
+          outImg.data[i+2] = Math.round(cropData[i+2]*alpha + 255*(1-alpha));
+          outImg.data[i+3] = 255;
+        }
+        outCtx.putImageData(outImg, 0, 0);
+        resolve(outCanvas.toDataURL('image/jpeg', 0.9));
+      }catch(e){ fallback(); }
+    };
+    const prefijo = maskBase64.indexOf('data:')===0 ? '' : 'data:image/png;base64,';
+    maskImg.src = prefijo + maskBase64;
+  });
 }
 
 function renderRevisionFoto(){
@@ -512,9 +589,8 @@ function renderRevisionFoto(){
   });
   let cardsHtml = '';
   d.items.forEach((it, i)=>{
-    const crop = it.caja ? cropDataUrl(d.canvas, d.width, d.height, it.caja) : d.dataUrl;
     cardsHtml += `<div class="detect-card" id="detect-${i}">
-      <img src="${crop}" alt="">
+      <img src="${it.cropPreview||d.dataUrl}" alt="">
       <div class="fields">
         <select onchange="currentDetections.items[${i}].categoria=this.value">${CATEGORIAS.map(c=>`<option ${c===it.categoria?'selected':''}>${c}</option>`).join('')}</select>
         <input value="${escAttr(it.tipo||'')}" placeholder="Tipo" oninput="currentDetections.items[${i}].tipo=this.value">
@@ -525,9 +601,11 @@ function renderRevisionFoto(){
       <button class="remove" onclick="quitarDeteccion(${i})" title="No incluir esta prenda">✕</button>
     </div>`;
   });
+  const badgeModelo = d.modelo ? `<span class="chip" style="cursor:default">🤖 Analizado con ${NOMBRE_MODELO[d.modelo]||d.modelo}</span>` : '';
   area.innerHTML = `
     <div class="review-photo"><img src="${d.dataUrl}">${boxesHtml}</div>
     <p class="hint" style="margin-top:10px">Revisa y corrige lo que haga falta antes de guardar</p>
+    ${badgeModelo}
     ${cardsHtml}
     <div style="display:flex;gap:8px;margin-top:14px">
       <button class="btn secondary" onclick="omitirFoto()">Descartar foto</button>
@@ -561,9 +639,8 @@ async function guardarDetecciones(){
   const origenUrl = origen.ok ? origen.url : '';
   for(const it of d.items){
     let fotoUrl = origenUrl;
-    if(it.caja){
-      const cropUrl = cropDataUrl(d.canvas, d.width, d.height, it.caja);
-      const subCrop = await apiPost('uploadImage', { imageBase64: cropUrl.split(',')[1], mimeType:'image/jpeg', fileName:'prenda-'+Date.now()+'.jpg' });
+    if(it.caja && it.cropPreview){
+      const subCrop = await apiPost('uploadImage', { imageBase64: it.cropPreview.split(',')[1], mimeType:'image/jpeg', fileName:'prenda-'+Date.now()+'.jpg' });
       if(subCrop.ok) fotoUrl = subCrop.url;
     }
     const row = {
@@ -579,6 +656,130 @@ async function guardarDetecciones(){
   showToast('Prendas guardadas');
   uploadIndex++;
   procesarSiguienteFoto();
+}
+
+// ============================================================
+//  "Qué me puse hoy" con foto — a diferencia de "Subir fotos" (que
+//  siempre crea prendas nuevas para armar el catálogo), aquí cada prenda
+//  detectada se compara contra tu catálogo: si ya la tienes, solo se
+//  registra como usada hoy (nada de duplicados); si es nueva, se agrega
+//  Y se registra como usada, todo en un solo paso.
+// ============================================================
+let hoyDetections = null;
+async function onFotoHoySeleccionada(fileList){
+  if(!fileList.length) return;
+  const resized = await resizeImageFile(fileList[0], 1280, 0.85);
+  mostrarRecorteManual(resized, { containerId:'hoyReviewArea', onListo: analizarFotoParaHoy, onDescartar: cancelarRecortarHoy });
+}
+function cancelarRecortarHoy(){
+  cleanupCropListeners();
+  hoyDetections = null;
+  document.getElementById('hoyReviewArea').innerHTML = '';
+}
+async function analizarFotoParaHoy(recortada){
+  document.getElementById('hoyReviewArea').innerHTML = '<p class="hint">Analizando foto con IA…</p>';
+  const r = await apiPost('extraerPrendas', { imageBase64: recortada.base64, mimeType: recortada.mimeType });
+  if(!r.ok){
+    document.getElementById('hoyReviewArea').innerHTML = `<p class="hint">No se pudo analizar esta foto (${r.error||'sin conexión'}).</p>
+      <button class="btn secondary" onclick="cancelarRecortarHoy()">Cancelar</button>
+      <button class="btn" onclick="analizarFotoParaHoy(lastCropped)">Reintentar</button>`;
+    return;
+  }
+  lastCropped = recortada;
+  hoyDetections = { ...recortada, modelo: r.modelo, items: (r.items||[]).map(it=>({ ...it, incluir:true })) };
+  document.getElementById('hoyReviewArea').innerHTML = '<p class="hint">Recortando cada prenda…</p>';
+  await prepararRecortes(hoyDetections);
+  renderRevisionHoy();
+}
+function candidatosParaPrenda(categoria){
+  return DATA.prendas.filter(p=>!esVerdadero(p.Papelera) && p.Categoria===categoria);
+}
+function renderRevisionHoy(){
+  const d = hoyDetections;
+  const area = document.getElementById('hoyReviewArea');
+  if(!d.items.length){
+    area.innerHTML = `<p class="hint">No se detectaron prendas claras en esta foto.</p>
+      <button class="btn secondary" onclick="cancelarRecortarHoy()">Cerrar</button>`;
+    return;
+  }
+  const badgeModelo = d.modelo ? `<span class="chip" style="cursor:default">🤖 Analizado con ${NOMBRE_MODELO[d.modelo]||d.modelo}</span>` : '';
+  let cardsHtml = '';
+  d.items.forEach((it, i)=>{
+    const candidatos = candidatosParaPrenda(it.categoria);
+    if(it.matchId===undefined){
+      const sugerido = candidatos.find(p=> p.Color && it.color && (p.Color.toLowerCase().includes(it.color.toLowerCase()) || it.color.toLowerCase().includes(p.Color.toLowerCase())));
+      it.matchId = sugerido ? sugerido.ID : null;
+    }
+    const pickHtml = candidatos.map(p=>`<div class="pick-item ${it.matchId===p.ID?'selected':''}" onclick="seleccionarCandidatoHoy(${i},'${p.ID}')">
+        ${p.FotoURL?`<img src="${p.FotoURL}">`:`<div class="ph">${CATEGORIA_ICONO[p.Categoria]}</div>`}
+        <div>${escAttr(p.Tipo||p.Categoria)}</div>
+      </div>`).join('') +
+      `<div class="pick-item ${it.matchId===null?'selected':''}" onclick="seleccionarCandidatoHoy(${i},null)">
+        <div class="ph nueva">✚</div><div>Nueva</div>
+      </div>`;
+    cardsHtml += `<div class="detect-card" id="detecthoy-${i}" style="flex-direction:column;align-items:stretch">
+      <div style="display:flex;gap:10px">
+        <img src="${it.cropPreview||d.dataUrl}" alt="">
+        <div class="fields">
+          <select onchange="hoyDetections.items[${i}].categoria=this.value;hoyDetections.items[${i}].matchId=undefined;renderRevisionHoy()">${CATEGORIAS.map(c=>`<option ${c===it.categoria?'selected':''}>${c}</option>`).join('')}</select>
+          <input value="${escAttr(it.tipo||'')}" placeholder="Tipo" oninput="hoyDetections.items[${i}].tipo=this.value">
+          <input value="${escAttr(it.color||'')}" placeholder="Color" oninput="hoyDetections.items[${i}].color=this.value">
+          <input value="${escAttr(it.colorSecundario||'')}" placeholder="Color secundario" oninput="hoyDetections.items[${i}].colorSecundario=this.value">
+        </div>
+        <button class="remove" onclick="quitarDeteccionHoy(${i})" title="No incluir esta prenda">✕</button>
+      </div>
+      <p class="hint" style="margin:8px 0 4px">¿Ya la tienes en tu catálogo?</p>
+      <div class="pick-list">${pickHtml}</div>
+    </div>`;
+  });
+  area.innerHTML = `${badgeModelo}${cardsHtml}
+    <div style="display:flex;gap:8px;margin-top:14px">
+      <button class="btn secondary" onclick="cancelarRecortarHoy()">Cancelar</button>
+      <button class="btn" onclick="guardarRecortesHoy()">Guardar y registrar hoy</button>
+    </div>`;
+}
+function seleccionarCandidatoHoy(i, id){ hoyDetections.items[i].matchId = id; renderRevisionHoy(); }
+function quitarDeteccionHoy(i){ hoyDetections.items.splice(i,1); renderRevisionHoy(); }
+async function guardarRecortesHoy(){
+  const d = hoyDetections;
+  if(!d.items.length){ cancelarRecortarHoy(); return; }
+  showToast('Guardando…');
+  const hayPrendasNuevas = d.items.some(it=>!it.matchId);
+  let origenUrl = '';
+  if(hayPrendasNuevas){
+    const origen = await apiPost('uploadImage', { imageBase64: d.base64, mimeType: d.mimeType, fileName: 'foto-hoy-'+Date.now()+'.jpg' });
+    origenUrl = origen.ok ? origen.url : '';
+  }
+  const prendaIds = [];
+  for(const it of d.items){
+    if(it.matchId){ prendaIds.push(it.matchId); continue; }
+    let fotoUrl = origenUrl;
+    if(it.caja && it.cropPreview){
+      const subCrop = await apiPost('uploadImage', { imageBase64: it.cropPreview.split(',')[1], mimeType:'image/jpeg', fileName:'prenda-'+Date.now()+'.jpg' });
+      if(subCrop.ok) fotoUrl = subCrop.url;
+    }
+    const row = {
+      ID: uid(), Categoria: it.categoria||'Ropa superior', Tipo: it.tipo||'', Color: it.color||'',
+      ColorSecundario: it.colorSecundario||'', Estampado: it.estampado||'', Marca:'', Temporada:'',
+      Formalidad:'', FotoURL: fotoUrl, FotoOrigenURL: origenUrl, FechaAlta: new Date().toISOString(),
+      UltimoUso:'', VecesUsado:0, Favorito:false, Notas:'', Papelera:false
+    };
+    await apiPost('saveRow', { table:'PRENDAS', row });
+    DATA.prendas.push(row);
+    prendaIds.push(row.ID);
+  }
+  const evento = document.getElementById('hoyEvento').value.trim();
+  const fecha = new Date().toISOString();
+  const r = await apiPost('registrarUso', { prendaIds, fecha, evento });
+  if(r.ok){
+    prendaIds.forEach(id=>{ const p=findPrenda(id); if(p){ p.UltimoUso=fecha; p.VecesUsado=(Number(p.VecesUsado)||0)+1; } });
+    DATA.usos.push(r.uso);
+    localStorage.setItem('ropa_data_cache', JSON.stringify(DATA));
+    hoyDetections = null;
+    document.getElementById('hoyReviewArea').innerHTML = '';
+    renderHoy();
+    showToast('Registrado');
+  } else showToast('No se pudo guardar: '+(r.error||'sin conexión'));
 }
 
 // ============================================================
@@ -787,7 +988,8 @@ async function pedirSugerencias(){
   const r = await apiPost('sugerirOutfit', { evento, clima, tonoPiel: perfil.TonoPiel||'', subtono: perfil.Subtono||'' });
   if(!r.ok){ wrap.innerHTML = `<p class="hint">No se pudo generar sugerencias: ${r.error||'sin conexión'}</p>`; return; }
   if(!r.outfits || !r.outfits.length){ wrap.innerHTML = '<p class="hint">La IA no encontró combinaciones — agrega más prendas al catálogo.</p>'; return; }
-  wrap.innerHTML = r.outfits.map((o,i)=>{
+  const badgeModelo = r.modelo ? `<p class="hint">🤖 Sugerido con ${NOMBRE_MODELO[r.modelo]||r.modelo}</p>` : '';
+  wrap.innerHTML = badgeModelo + r.outfits.map((o,i)=>{
     const prendas = (o.prendaIds||[]).map(id=>findPrenda(id)).filter(Boolean);
     return `<div class="outfit-card">
       <div class="outfit-items">${prendas.map(p=> p.FotoURL?`<img src="${p.FotoURL}">`:`<div style="width:64px;height:64px;border-radius:8px;background:var(--accent-soft);display:flex;align-items:center;justify-content:center">${CATEGORIA_ICONO[p.Categoria]}</div>`).join('')}</div>
