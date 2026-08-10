@@ -585,7 +585,7 @@ function renderRevisionFoto(){
     ${cardsHtml}
     <div style="display:flex;gap:8px;margin-top:14px">
       <button class="btn secondary" onclick="omitirFoto()">Descartar foto</button>
-      <button class="btn" onclick="guardarDetecciones()">Guardar prendas</button>
+      <button class="btn" id="btnGuardarPrendas" onclick="guardarDetecciones()">Guardar prendas</button>
     </div>`;
 }
 function escAttr(s){ return String(s).replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;'); }
@@ -618,7 +618,7 @@ async function crearFilaPrenda(it, origenUrl){
     const subCrop = await apiPost('uploadImage', { imageBase64: it.cropPreview.split(',')[1], mimeType:'image/jpeg', fileName:'prenda-'+Date.now()+'.jpg' });
     if(subCrop.ok) fotoRealUrl = subCrop.url;
   }
-  let fotoUrl = fotoRealUrl || origenUrl;
+  let fotoGeneradaUrl = '';
   if(it.cropPreview){
     const gen = await apiPost('generarFotoCatalogo', {
       imageBase64: it.cropPreview.split(',')[1], mimeType:'image/jpeg',
@@ -626,13 +626,13 @@ async function crearFilaPrenda(it, origenUrl){
     });
     if(gen.ok){
       const subGen = await apiPost('uploadImage', { imageBase64: gen.imageBase64, mimeType: gen.mimeType||'image/jpeg', fileName:'catalogo-'+Date.now()+'.jpg' });
-      if(subGen.ok) fotoUrl = subGen.url;
+      if(subGen.ok) fotoGeneradaUrl = subGen.url;
     }
   }
   return {
     ID: uid(), Categoria: it.categoria||'Ropa superior', Tipo: it.tipo||'', Color: it.color||'',
     ColorSecundario: it.colorSecundario||'', Estampado: it.estampado||'', Marca:'', Temporada:'',
-    Formalidad:'', FotoURL: fotoUrl, FotoRealURL: fotoRealUrl, FotoOrigenURL: origenUrl||'', FechaAlta: new Date().toISOString(),
+    Formalidad:'', FotoURL: fotoGeneradaUrl||fotoRealUrl||origenUrl||'', FotoGeneradaURL: fotoGeneradaUrl, FotoRealURL: fotoRealUrl, FotoOrigenURL: origenUrl||'', FechaAlta: new Date().toISOString(),
     UltimoUso:'', VecesUsado:0, Favorito:false, Notas:'', Papelera:false
   };
 }
@@ -640,17 +640,19 @@ async function crearFilaPrenda(it, origenUrl){
 async function guardarDetecciones(){
   const d = currentDetections;
   if(!d.items.length){ omitirFoto(); return; }
+  const btn = document.getElementById('btnGuardarPrendas');
+  if(btn){ btn.disabled = true; btn.textContent = 'Guardando…'; }
   showToast('Guardando…');
   const origen = await apiPost('uploadImage', { imageBase64: d.base64, mimeType: d.mimeType, fileName: 'foto-'+Date.now()+'.jpg' });
   const origenUrl = origen.ok ? origen.url : '';
   for(let i=0;i<d.items.length;i++){
-    showToast(`Generando prenda ${i+1}/${d.items.length}…`);
+    if(btn) btn.textContent = `Generando prenda ${i+1}/${d.items.length}…`;
     const row = await crearFilaPrenda(d.items[i], origenUrl);
     await apiPost('saveRow', { table:'PRENDAS', row });
     DATA.prendas.push(row);
   }
   localStorage.setItem('ropa_data_cache', JSON.stringify(DATA));
-  showToast('Prendas guardadas');
+  showToast('✓ Prendas guardadas');
   uploadIndex++;
   procesarSiguienteFoto();
 }
@@ -732,7 +734,7 @@ function renderRevisionHoy(){
   area.innerHTML = `${badgeModelo}${cardsHtml}
     <div style="display:flex;gap:8px;margin-top:14px">
       <button class="btn secondary" onclick="cancelarRecortarHoy()">Cancelar</button>
-      <button class="btn" onclick="guardarRecortesHoy()">Guardar y registrar hoy</button>
+      <button class="btn" id="btnGuardarHoy" onclick="guardarRecortesHoy()">Guardar y registrar hoy</button>
     </div>`;
 }
 function seleccionarCandidatoHoy(i, id){ hoyDetections.items[i].matchId = id; renderRevisionHoy(); }
@@ -740,7 +742,8 @@ function quitarDeteccionHoy(i){ hoyDetections.items.splice(i,1); renderRevisionH
 async function guardarRecortesHoy(){
   const d = hoyDetections;
   if(!d.items.length){ cancelarRecortarHoy(); return; }
-  showToast('Guardando…');
+  const btn = document.getElementById('btnGuardarHoy');
+  if(btn){ btn.disabled = true; btn.textContent = 'Guardando…'; }
   const hayPrendasNuevas = d.items.some(it=>!it.matchId);
   let origenUrl = '';
   if(hayPrendasNuevas){
@@ -750,7 +753,7 @@ async function guardarRecortesHoy(){
   const prendaIds = [];
   for(const it of d.items){
     if(it.matchId){ prendaIds.push(it.matchId); continue; }
-    showToast('Generando prenda nueva…');
+    if(btn) btn.textContent = 'Generando prenda nueva…';
     const row = await crearFilaPrenda(it, origenUrl);
     await apiPost('saveRow', { table:'PRENDAS', row });
     DATA.prendas.push(row);
@@ -766,8 +769,11 @@ async function guardarRecortesHoy(){
     hoyDetections = null;
     document.getElementById('hoyReviewArea').innerHTML = '';
     renderHoy();
-    showToast('Registrado');
-  } else showToast('No se pudo guardar: '+(r.error||'sin conexión'));
+    showToast('✓ Registrado');
+  } else {
+    showToast('No se pudo guardar: '+(r.error||'sin conexión'));
+    if(btn){ btn.disabled = false; btn.textContent = 'Guardar y registrar hoy'; }
+  }
 }
 
 // ============================================================
@@ -858,13 +864,10 @@ function abrirEditarPrenda(id){
   overlay.innerHTML = `<div class="modal">
     <h3>Editar prenda</h3>
     <div class="field" style="text-align:center">
-      ${p.FotoURL ? `<img id="edFotoPreview" src="${p.FotoURL}" style="max-width:100%;max-height:220px;border-radius:12px;object-fit:contain">
-      <div><button class="btn secondary" id="edRecortar" style="margin-top:8px">✂️ Volver a recortar</button></div>` : `<p class="hint">Esta prenda no tiene foto</p>`}
-      <p class="hint" style="margin-top:6px">
-        ${p.FotoRealURL ? `<a href="#" onclick="event.preventDefault();verFotoGrande('${p.FotoRealURL}')">ver foto real (sin generar)</a>` : ''}
-        ${p.FotoRealURL && p.FotoOrigenURL && p.FotoOrigenURL!==p.FotoRealURL ? ' · ' : ''}
-        ${p.FotoOrigenURL && p.FotoOrigenURL!==p.FotoRealURL ? `<a href="#" onclick="event.preventDefault();verFotoGrande('${p.FotoOrigenURL}')">ver foto original completa</a>` : ''}
-      </p>
+      ${p.FotoURL ? `<img id="edFotoPreview" src="${p.FotoURL}" style="max-width:100%;max-height:220px;border-radius:12px;object-fit:contain">` : `<p class="hint">Esta prenda no tiene foto</p>`}
+      <div id="edFotoBotones" style="display:flex;gap:6px;flex-wrap:wrap;justify-content:center;margin-top:8px">${botonesFotoHtml(p)}</div>
+      <input type="file" id="edFileTienda" accept="image/*" style="display:none">
+      ${p.FotoOrigenURL ? `<p class="hint" style="margin-top:6px"><a href="#" onclick="event.preventDefault();verFotoGrande('${p.FotoOrigenURL}')">ver foto original completa</a></p>` : ''}
       <div id="edCropArea"></div>
     </div>
     <div class="field"><label>Categoría</label><select id="edCat">${CATEGORIAS.map(c=>`<option ${c===p.Categoria?'selected':''}>${c}</option>`).join('')}</select></div>
@@ -882,19 +885,20 @@ function abrirEditarPrenda(id){
   document.body.appendChild(overlay);
   overlay.addEventListener('click', e=>{ if(e.target===overlay) overlay.remove(); });
   overlay.querySelector('#edCancel').onclick = ()=> overlay.remove();
-  const btnRecortar = overlay.querySelector('#edRecortar');
-  if(btnRecortar) btnRecortar.onclick = async ()=>{
-    const fileId = fileIdDeUrlDrive(p.FotoRealURL) || fileIdDeUrlDrive(p.FotoOrigenURL) || fileIdDeUrlDrive(p.FotoURL);
-    if(!fileId){ showToast('Esta prenda no tiene foto para recortar'); return; }
-    document.getElementById('edCropArea').innerHTML = '<p class="hint">Cargando foto…</p>';
-    const r = await apiPost('descargarImagenDrive', { fileId });
-    if(!r.ok){ document.getElementById('edCropArea').innerHTML = `<p class="hint">No se pudo cargar la foto (${r.error||'sin conexión'}).</p>`; return; }
-    const resized = await imagenDesdeBase64(r.base64, r.mimeType, 1280);
-    mostrarRecorteManual(resized, {
-      containerId: 'edCropArea',
-      onListo: (recortada)=> confirmarRecorteEdicion(p, recortada),
-      onDescartar: ()=>{ cleanupCropListeners(); document.getElementById('edCropArea').innerHTML=''; }
-    });
+  cablearBotonesFoto(p);
+  document.getElementById('edFileTienda').onchange = async (e)=>{
+    const files = e.target.files; if(!files.length) return;
+    showToast('Subiendo foto de tienda…');
+    const resized = await resizeImageFile(files[0], 1280, 0.9);
+    const subida = await apiPost('uploadImage', { imageBase64: resized.base64, mimeType: resized.mimeType, fileName:'tienda-'+Date.now()+'.jpg' });
+    if(!subida.ok){ showToast('No se pudo subir: '+(subida.error||'sin conexión')); return; }
+    p.FotoGeneradaURL = subida.url;
+    p.FotoURL = subida.url;
+    await apiPost('saveRow', { table:'PRENDAS', row:p });
+    localStorage.setItem('ropa_data_cache', JSON.stringify(DATA));
+    renderCatalogo();
+    refrescarFotoModal(p);
+    showToast('Foto de tienda guardada');
   };
   overlay.querySelector('#edGuardar').onclick = async ()=>{
     p.Categoria = overlay.querySelector('#edCat').value;
@@ -910,6 +914,78 @@ function abrirEditarPrenda(id){
     localStorage.setItem('ropa_data_cache', JSON.stringify(DATA));
     showToast('Guardado');
   };
+}
+// Botones de fuente de foto: cuáles se muestran depende de qué versiones
+// existan y cuál está activa ahora mismo — se regeneran (no solo se
+// deshabilitan) cada vez que cambia la foto, vía refrescarFotoModal.
+function botonesFotoHtml(p){
+  return (p.FotoGeneradaURL && p.FotoURL!==p.FotoGeneradaURL ? `<button class="btn ghost" id="edUsarGenerada" style="font-size:12px;padding:6px 10px">🖼️ Usar generada</button>` : '') +
+    (p.FotoRealURL && p.FotoURL!==p.FotoRealURL ? `<button class="btn ghost" id="edUsarReal" style="font-size:12px;padding:6px 10px">📸 Usar foto real</button>` : '') +
+    `<button class="btn ghost" id="edRegenerar" style="font-size:12px;padding:6px 10px">🔄 Regenerar</button>` +
+    `<button class="btn ghost" id="edRecortar" style="font-size:12px;padding:6px 10px">✂️ Recortar</button>` +
+    `<button class="btn ghost" id="edSubirTienda" style="font-size:12px;padding:6px 10px">📤 Subir foto de tienda</button>`;
+}
+function cablearBotonesFoto(p){
+  const btnGen = document.getElementById('edUsarGenerada');
+  if(btnGen) btnGen.onclick = async ()=>{
+    p.FotoURL = p.FotoGeneradaURL;
+    await apiPost('saveRow', { table:'PRENDAS', row:p });
+    localStorage.setItem('ropa_data_cache', JSON.stringify(DATA));
+    renderCatalogo(); refrescarFotoModal(p); showToast('Mostrando la foto generada');
+  };
+  const btnReal = document.getElementById('edUsarReal');
+  if(btnReal) btnReal.onclick = async ()=>{
+    p.FotoURL = p.FotoRealURL;
+    await apiPost('saveRow', { table:'PRENDAS', row:p });
+    localStorage.setItem('ropa_data_cache', JSON.stringify(DATA));
+    renderCatalogo(); refrescarFotoModal(p); showToast('Mostrando la foto real');
+  };
+  const btnRegen = document.getElementById('edRegenerar');
+  if(btnRegen) btnRegen.onclick = ()=> regenerarFotoPrenda(p);
+  const btnRecortar = document.getElementById('edRecortar');
+  if(btnRecortar) btnRecortar.onclick = async ()=>{
+    const fileId = fileIdDeUrlDrive(p.FotoRealURL) || fileIdDeUrlDrive(p.FotoOrigenURL) || fileIdDeUrlDrive(p.FotoURL);
+    if(!fileId){ showToast('Esta prenda no tiene foto para recortar'); return; }
+    document.getElementById('edCropArea').innerHTML = '<p class="hint">Cargando foto…</p>';
+    const r = await apiPost('descargarImagenDrive', { fileId });
+    if(!r.ok){ document.getElementById('edCropArea').innerHTML = `<p class="hint">No se pudo cargar la foto (${r.error||'sin conexión'}).</p>`; return; }
+    const resized = await imagenDesdeBase64(r.base64, r.mimeType, 1280);
+    mostrarRecorteManual(resized, {
+      containerId: 'edCropArea',
+      onListo: (recortada)=> confirmarRecorteEdicion(p, recortada),
+      onDescartar: ()=>{ cleanupCropListeners(); document.getElementById('edCropArea').innerHTML=''; }
+    });
+  };
+  const btnTienda = document.getElementById('edSubirTienda');
+  if(btnTienda) btnTienda.onclick = ()=> document.getElementById('edFileTienda').click();
+}
+function refrescarFotoModal(p){
+  const preview = document.getElementById('edFotoPreview');
+  if(preview) preview.src = p.FotoURL;
+  const cont = document.getElementById('edFotoBotones');
+  if(cont){ cont.innerHTML = botonesFotoHtml(p); cablearBotonesFoto(p); }
+}
+async function regenerarFotoPrenda(p){
+  const fileId = fileIdDeUrlDrive(p.FotoRealURL) || fileIdDeUrlDrive(p.FotoOrigenURL) || fileIdDeUrlDrive(p.FotoURL);
+  if(!fileId){ showToast('No hay una foto real de esta prenda para generar desde ahí'); return; }
+  const btn = document.getElementById('edRegenerar');
+  if(btn){ btn.disabled = true; btn.textContent = 'Generando…'; }
+  const r = await apiPost('descargarImagenDrive', { fileId });
+  if(!r.ok){ showToast('No se pudo cargar la foto: '+(r.error||'sin conexión')); if(btn){ btn.disabled=false; btn.textContent='🔄 Regenerar'; } return; }
+  const gen = await apiPost('generarFotoCatalogo', {
+    imageBase64: r.base64, mimeType: r.mimeType,
+    categoria: p.Categoria, tipo: p.Tipo, color: p.Color, colorSecundario: p.ColorSecundario, estampado: p.Estampado
+  });
+  if(!gen.ok){ showToast('No se pudo generar: '+(gen.error||'')); if(btn){ btn.disabled=false; btn.textContent='🔄 Regenerar'; } return; }
+  const subGen = await apiPost('uploadImage', { imageBase64: gen.imageBase64, mimeType: gen.mimeType||'image/jpeg', fileName:'catalogo-'+Date.now()+'.jpg' });
+  if(!subGen.ok){ showToast('No se pudo guardar la imagen generada'); if(btn){ btn.disabled=false; btn.textContent='🔄 Regenerar'; } return; }
+  p.FotoGeneradaURL = subGen.url;
+  p.FotoURL = subGen.url;
+  await apiPost('saveRow', { table:'PRENDAS', row:p });
+  localStorage.setItem('ropa_data_cache', JSON.stringify(DATA));
+  renderCatalogo();
+  refrescarFotoModal(p);
+  showToast('Foto regenerada');
 }
 function fileIdDeUrlDrive(url){
   const m = String(url||'').match(/[?&]id=([^&]+)/);
@@ -951,14 +1027,13 @@ async function confirmarRecorteEdicion(p, recortada){
   });
   if(gen.ok){
     const subGen = await apiPost('uploadImage', { imageBase64: gen.imageBase64, mimeType: gen.mimeType||'image/jpeg', fileName:'catalogo-'+Date.now()+'.jpg' });
-    if(subGen.ok) p.FotoURL = subGen.url;
+    if(subGen.ok){ p.FotoGeneradaURL = subGen.url; p.FotoURL = subGen.url; }
   }
   await apiPost('saveRow', { table:'PRENDAS', row:p });
   localStorage.setItem('ropa_data_cache', JSON.stringify(DATA));
   renderCatalogo();
   document.getElementById('edCropArea').innerHTML = '';
-  const preview = document.getElementById('edFotoPreview');
-  if(preview) preview.src = p.FotoURL;
+  refrescarFotoModal(p);
   showToast('Foto actualizada');
 }
 
