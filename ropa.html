@@ -259,6 +259,11 @@ nav.tabbar button .ic{font-size:19px}
       </div>
       <div class="field"><label class="hint">Ciudad (para el clima)</label><input type="text" id="perfilCiudad" placeholder="Ciudad de México"></div>
       <button class="btn" onclick="guardarPerfil()">Guardar perfil</button>
+
+      <h3 style="margin-top:26px">Fotos subidas</h3>
+      <p class="hint">Ponles fecha si sabes cuándo son (se ve igual en todas las prendas que salieron de esa foto) o elimínalas de tus prendas.</p>
+      <div id="fotosSubidasArea"></div>
+
       <h3 style="margin-top:26px">Conexión</h3>
       <p class="hint" id="perfilConexionInfo"></p>
     </section>
@@ -282,7 +287,7 @@ nav.tabbar button .ic{font-size:19px}
 // ============================================================
 let GAS_URL = localStorage.getItem('ropa_gas_url') || '';
 let SHEET_URL = '';
-let DATA = { prendas: [], usos: [], outfits_sugeridos: [], perfil: [] };
+let DATA = { prendas: [], usos: [], outfits_sugeridos: [], perfil: [], fotos_origen: [] };
 let showTrash = false;
 let soloFavoritos = false;
 let activeCategoria = 'Todas';
@@ -329,7 +334,7 @@ function finishSetup(){
   });
 }
 function normalizeData(d){
-  return { prendas: d.prendas||[], usos: d.usos||[], outfits_sugeridos: d.outfits_sugeridos||[], perfil: d.perfil||[] };
+  return { prendas: d.prendas||[], usos: d.usos||[], outfits_sugeridos: d.outfits_sugeridos||[], perfil: d.perfil||[], fotos_origen: d.fotos_origen||[] };
 }
 
 function boot(){
@@ -601,8 +606,10 @@ function renderRevisionFoto(){
     const prendaSugerida = it.matchId ? DATA.prendas.find(p=>p.ID===it.matchId) : null;
     const estadoMatchHtml = prendaSugerida
       ? `<div style="display:flex;align-items:center;gap:8px;margin-top:6px;padding:8px;background:var(--accent-soft);border-radius:10px">
-           ${prendaSugerida.FotoURL?`<img src="${prendaSugerida.FotoURL}" style="width:40px;height:40px;object-fit:cover;border-radius:8px;flex:none">`:''}
-           <div style="flex:1;font-size:12px">🔁 Ya está en tu catálogo: <b>${escAttr(prendaSugerida.Tipo||prendaSugerida.Categoria)}</b><br><span class="hint">se suma a "veces usada", no se duplica</span></div>
+           ${prendaSugerida.FotoURL?`<img src="${prendaSugerida.FotoURL}" onclick="verFotoGrande('${prendaSugerida.FotoURL}')" style="width:40px;height:40px;object-fit:cover;border-radius:8px;flex:none;cursor:zoom-in" title="Ver para confirmar">`:''}
+           <div style="flex:1;font-size:12px">🔁 Ya está en tu catálogo: <b>${escAttr(prendaSugerida.Tipo||prendaSugerida.Categoria)}</b><br><span class="hint">toca la foto para confirmar — se suma a "veces usada", no se duplica</span>
+             <input type="date" value="${it.fechaUso||''}" oninput="currentDetections.items[${i}].fechaUso=this.value" style="margin-top:6px;font-size:12px;padding:5px 8px" title="¿Sabes cuándo te la pusiste? (opcional)">
+           </div>
          </div>`
       : `<p class="hint" style="margin-top:6px">✨ Se guardará como prenda nueva en tu catálogo.</p>`;
     cardsHtml += `<div class="detect-card" id="detect-${i}" style="flex-direction:column;align-items:stretch">
@@ -689,23 +696,34 @@ async function guardarDetecciones(){
   const origen = await apiPost('uploadImage', { imageBase64: d.base64, mimeType: d.mimeType, fileName: 'foto-'+Date.now()+'.jpg' });
   const origenUrl = origen.ok ? origen.url : '';
   // Las que ya reconocimos en tu catálogo NO se vuelven a crear — solo se
-  // suman a "veces usada" (sin fecha: no sabemos cuándo es esta foto de
-  // verdad, ver registrarUso en el backend).
-  const prendaIdsExistentes = [];
+  // suman a "veces usada". Si pusiste la fecha en que te la pusiste, se
+  // manda tal cual; si no, sin fecha (registrarUso solo cuenta, no toca
+  // UltimoUso). Se agrupan por fecha para no mandar una llamada por
+  // prenda cuando varias comparten la misma (o ninguna).
+  const porFecha = {};
   for(let i=0;i<d.items.length;i++){
     const it = d.items[i];
-    if(it.matchId){ prendaIdsExistentes.push(it.matchId); continue; }
+    if(it.matchId){
+      const clave = it.fechaUso || '';
+      (porFecha[clave] = porFecha[clave] || []).push(it.matchId);
+      continue;
+    }
     if(btn) btn.textContent = `Generando prenda ${i+1}/${d.items.length}…`;
     const row = await crearFilaPrenda(it, origenUrl);
     await apiPost('saveRow', { table:'PRENDAS', row });
     DATA.prendas.push(row);
   }
-  if(prendaIdsExistentes.length){
+  const clavesFecha = Object.keys(porFecha);
+  if(clavesFecha.length){
     if(btn) btn.textContent = 'Registrando en el historial…';
-    const r = await apiPost('registrarUso', { prendaIds: prendaIdsExistentes, fotoUrl: origenUrl });
-    if(r.ok){
-      prendaIdsExistentes.forEach(id=>{ const p=findPrenda(id); if(p) p.VecesUsado=(Number(p.VecesUsado)||0)+1; });
-      DATA.usos.push(r.uso);
+    for(const clave of clavesFecha){
+      const prendaIds = porFecha[clave];
+      const fecha = clave ? new Date(clave).toISOString() : undefined;
+      const r = await apiPost('registrarUso', { prendaIds, fecha, fotoUrl: origenUrl });
+      if(r.ok){
+        prendaIds.forEach(id=>{ const p=findPrenda(id); if(p){ p.VecesUsado=(Number(p.VecesUsado)||0)+1; if(fecha) p.UltimoUso=fecha; } });
+        DATA.usos.push(r.uso);
+      }
     }
   }
   localStorage.setItem('ropa_data_cache', JSON.stringify(DATA));
@@ -797,8 +815,8 @@ function renderRevisionHoy(){
     const prendaSugerida = it.matchId ? DATA.prendas.find(p=>p.ID===it.matchId) : null;
     const estadoMatchHtml = prendaSugerida
       ? `<div style="display:flex;align-items:center;gap:8px;margin-top:8px;padding:8px;background:var(--accent-soft);border-radius:10px">
-           ${prendaSugerida.FotoURL?`<img src="${prendaSugerida.FotoURL}" style="width:44px;height:44px;object-fit:cover;border-radius:8px;flex:none">`:''}
-           <div style="flex:1;font-size:13px">🔁 Ya la tienes: <b>${escAttr(prendaSugerida.Tipo||prendaSugerida.Categoria)}</b>, ${escAttr(prendaSugerida.Color||'')}<br><span class="hint">se va a registrar el uso sobre esta prenda, no una nueva</span></div>
+           ${prendaSugerida.FotoURL?`<img src="${prendaSugerida.FotoURL}" onclick="verFotoGrande('${prendaSugerida.FotoURL}')" style="width:44px;height:44px;object-fit:cover;border-radius:8px;flex:none;cursor:zoom-in" title="Ver para confirmar">`:''}
+           <div style="flex:1;font-size:13px">🔁 Ya la tienes: <b>${escAttr(prendaSugerida.Tipo||prendaSugerida.Categoria)}</b>, ${escAttr(prendaSugerida.Color||'')}<br><span class="hint">toca la foto para confirmar — se va a registrar el uso sobre esta prenda, no una nueva</span></div>
          </div>`
       : `<p class="hint" style="margin-top:8px">✨ Se guardará como <b>prenda nueva</b> (no encontramos ninguna parecida).</p>`;
     cardsHtml += `<div class="detect-card" id="detecthoy-${i}" style="flex-direction:column;align-items:stretch">
@@ -933,8 +951,10 @@ function renderCatalogo(){
     return `<div class="card">
       ${foto}
       <div class="body">
-        <div class="tipo">${escAttr(p.Tipo||p.Categoria)}</div>
-        <div class="meta">${escAttr(p.Color||'')} · ${Number(p.VecesUsado)||0} usos · ${usoTxt}</div>
+        <div onclick="abrirVerPrenda('${p.ID}')" style="cursor:pointer">
+          <div class="tipo">${escAttr(p.Tipo||p.Categoria)}</div>
+          <div class="meta">${escAttr(p.Color||'')} · ${Number(p.VecesUsado)||0} usos · ${usoTxt}</div>
+        </div>
         <div class="row-actions">
           <button class="${esVerdadero(p.Favorito)?'fav':''}" onclick="toggleFavorito('${p.ID}')" title="Favorito">${esVerdadero(p.Favorito)?'★':'☆'}</button>
           ${showTrash
@@ -995,16 +1015,54 @@ function formatoFechaUso(fecha){
   if(isNaN(d.getTime())) return 'fecha desconocida';
   return d.toLocaleDateString('es-MX', {day:'numeric', month:'short'});
 }
+function fechaFotoOrigen(url){
+  if(!url) return '';
+  const f = DATA.fotos_origen.find(x=>x.URL===url);
+  return f ? f.Fecha : '';
+}
 function historialUsoHtml(p){
-  const usos = DATA.usos.filter(u=>{
+  const eventos = DATA.usos.filter(u=>{
     let ids = []; try{ ids = JSON.parse(u.PrendaIDsJSON||'[]'); }catch(e){}
     return ids.includes(p.ID);
-  }).sort((a,b)=> (b.Fecha?new Date(b.Fecha).getTime():0) - (a.Fecha?new Date(a.Fecha).getTime():0));
-  if(!usos.length) return '<p class="hint">Todavía no hay registros de uso para esta prenda.</p>';
-  return `<div class="pick-list">${usos.map(u=>{
-    const foto = u.FotoURL ? `<img src="${u.FotoURL}" onclick="verFotoGrande('${u.FotoURL}')" style="cursor:zoom-in">` : `<div class="ph">📅</div>`;
-    return `<div class="pick-item">${foto}<div>${formatoFechaUso(u.Fecha)}</div></div>`;
+  }).map(u=>({ fecha:u.Fecha, foto:u.FotoURL, esOriginal:false }));
+  if(p.FotoOrigenURL) eventos.push({ fecha: fechaFotoOrigen(p.FotoOrigenURL), foto: p.FotoOrigenURL, esOriginal:true });
+  eventos.sort((a,b)=> (b.fecha?new Date(b.fecha).getTime():0) - (a.fecha?new Date(a.fecha).getTime():0));
+  if(!eventos.length) return '<p class="hint">Todavía no hay registros de uso para esta prenda.</p>';
+  return `<div class="pick-list">${eventos.map(u=>{
+    const foto = u.foto ? `<img src="${u.foto}" onclick="verFotoGrande('${u.foto}')" style="cursor:zoom-in">` : `<div class="ph">📅</div>`;
+    const etiqueta = formatoFechaUso(u.fecha) + (u.esOriginal ? ' (original)' : '');
+    return `<div class="pick-item">${foto}<div>${etiqueta}</div></div>`;
   }).join('')}</div>`;
+}
+// Solo ver — clic en el nombre/color de la tarjeta del catálogo. No es el
+// modal de editar: no hay campos, solo la foto, los datos y el
+// historial. "✏️ Editar" adentro lleva al modal de editar si hace falta.
+function abrirVerPrenda(id){
+  const p = findPrenda(id); if(!p) return;
+  const dias = diasDesde(p.UltimoUso);
+  const usoTxt = p.UltimoUso ? (dias===0?'usada hoy':`hace ${dias} día${dias===1?'':'s'}`) : 'nunca usada';
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay';
+  overlay.innerHTML = `<div class="modal">
+    <h3>${escAttr(p.Tipo||p.Categoria)}</h3>
+    <div style="text-align:center">
+      ${p.FotoURL ? `<img src="${p.FotoURL}" onclick="verFotoGrande('${p.FotoURL}')" style="max-width:100%;max-height:260px;object-fit:contain;border-radius:12px;cursor:zoom-in">` : ''}
+    </div>
+    <p class="hint" style="margin-top:10px">${CATEGORIA_ICONO[p.Categoria]||''} ${escAttr(p.Categoria)} · ${escAttr(p.Color||'')}${p.ColorSecundario?'/'+escAttr(p.ColorSecundario):''} ${p.Estampado?'· '+escAttr(p.Estampado):''}</p>
+    ${p.Marca?`<p class="hint">Marca: ${escAttr(p.Marca)}</p>`:''}
+    ${p.Formalidad?`<p class="hint">Formalidad: ${escAttr(p.Formalidad)}</p>`:''}
+    ${p.Notas?`<p class="hint">${escAttr(p.Notas)}</p>`:''}
+    <p class="hint"><b>${Number(p.VecesUsado)||0} usos</b> · ${usoTxt}</p>
+    <div class="field"><label>Historial</label>${historialUsoHtml(p)}</div>
+    <div class="actions">
+      <button class="btn ghost" id="verCerrar">Cerrar</button>
+      <button class="btn" id="verEditar">✏️ Editar</button>
+    </div>
+  </div>`;
+  document.body.appendChild(overlay);
+  overlay.addEventListener('click', e=>{ if(e.target===overlay) overlay.remove(); });
+  overlay.querySelector('#verCerrar').onclick = ()=> overlay.remove();
+  overlay.querySelector('#verEditar').onclick = ()=>{ overlay.remove(); abrirEditarPrenda(id); };
 }
 function abrirEditarPrenda(id){
   const p = findPrenda(id); if(!p) return;
@@ -1017,7 +1075,6 @@ function abrirEditarPrenda(id){
       <div id="edFotoBotones" style="display:flex;gap:6px;flex-wrap:wrap;justify-content:center;margin-top:8px">${botonesFotoHtml(p)}</div>
       <input type="text" id="edFeedback" placeholder="¿Algo que corregir? ej: sin cinto, mangas largas" style="margin-top:8px">
       <input type="file" id="edFileTienda" accept="image/*" style="display:none">
-      ${p.FotoOrigenURL ? `<p class="hint" style="margin-top:6px"><a href="#" onclick="event.preventDefault();verFotoGrande('${p.FotoOrigenURL}')">ver foto original completa</a></p>` : ''}
       <div id="edCropArea"></div>
     </div>
     <div class="field"><label>Categoría</label><select id="edCat">${CATEGORIAS.map(c=>`<option ${c===p.Categoria?'selected':''}>${c}</option>`).join('')}</select></div>
@@ -1447,6 +1504,60 @@ function renderPerfilScreen(){
   document.getElementById('perfilSubtono').value = p.Subtono||'';
   document.getElementById('perfilCiudad').value = p.Ciudad||'';
   document.getElementById('perfilConexionInfo').innerHTML = `${DATA.prendas.length} prendas en tu catálogo` + (SHEET_URL ? ` · <a href="${SHEET_URL}" target="_blank" rel="noopener">ver mi hoja de datos</a>` : '');
+  renderFotosSubidas();
+}
+// Una "foto subida" = todas las prendas activas que comparten la misma
+// FotoOrigenURL (varias prendas suelen salir de la misma foto). Se
+// administra aquí en vez de por prenda porque la fecha/el borrado deben
+// verse igual en todas las prendas de esa foto, no una por una.
+function fotosOrigenAgrupadas(){
+  const grupos = {};
+  DATA.prendas.filter(p=>p.FotoOrigenURL && !esVerdadero(p.Papelera)).forEach(p=>{
+    (grupos[p.FotoOrigenURL] = grupos[p.FotoOrigenURL] || []).push(p);
+  });
+  return grupos;
+}
+function renderFotosSubidas(){
+  const cont = document.getElementById('fotosSubidasArea');
+  const grupos = fotosOrigenAgrupadas();
+  const urls = Object.keys(grupos);
+  if(!urls.length){ cont.innerHTML = '<p class="hint">Todavía no hay fotos de origen guardadas.</p>'; return; }
+  cont.innerHTML = urls.map(url=>{
+    const prendas = grupos[url];
+    const fecha = fechaFotoOrigen(url);
+    const fechaInput = fecha && !isNaN(new Date(fecha).getTime()) ? new Date(fecha).toISOString().slice(0,10) : '';
+    return `<div class="detect-card" style="align-items:flex-start">
+      <img src="${url}" onclick="verFotoGrande('${url}')" style="width:64px;height:64px;object-fit:cover;border-radius:8px;cursor:zoom-in;flex:none">
+      <div class="fields" style="grid-template-columns:1fr;flex:1">
+        <div class="hint">${prendas.map(p=>escAttr(p.Tipo||p.Categoria)).join(', ')}</div>
+        <input type="date" value="${fechaInput}" onchange="guardarFechaFotoOrigen('${url}',this.value)">
+      </div>
+      <button class="remove" onclick="pedirEliminarFotoOrigen('${url}')" title="Quitar esta foto de tus prendas">🗑</button>
+    </div>`;
+  }).join('');
+}
+async function guardarFechaFotoOrigen(url, valorFecha){
+  const fecha = valorFecha ? new Date(valorFecha).toISOString() : '';
+  let f = DATA.fotos_origen.find(x=>x.URL===url);
+  const row = { ID: f?f.ID:uid(), URL:url, Fecha:fecha };
+  if(f) Object.assign(f, row); else DATA.fotos_origen.push(row);
+  localStorage.setItem('ropa_data_cache', JSON.stringify(DATA));
+  await apiPost('saveRow', { table:'FOTOS_ORIGEN', row });
+  showToast('Fecha guardada');
+}
+function pedirEliminarFotoOrigen(url){
+  confirmarEliminar('Se va a quitar esta foto de todas las prendas que la usan como referencia — no borra las prendas, solo el enlace a esta foto.', async ()=>{
+    const afectadas = DATA.prendas.filter(p=>p.FotoOrigenURL===url);
+    for(const p of afectadas){
+      p.FotoOrigenURL = '';
+      await apiPost('saveRow', { table:'PRENDAS', row:p });
+    }
+    const f = DATA.fotos_origen.find(x=>x.URL===url);
+    if(f){ await apiPost('deleteRow', { table:'FOTOS_ORIGEN', id:f.ID }); DATA.fotos_origen = DATA.fotos_origen.filter(x=>x.URL!==url); }
+    localStorage.setItem('ropa_data_cache', JSON.stringify(DATA));
+    renderFotosSubidas();
+    showToast('Foto quitada de tus prendas');
+  });
 }
 async function guardarPerfil(){
   const row = {
