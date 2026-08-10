@@ -99,8 +99,8 @@ nav.tabbar button .ic{font-size:19px}
 .detect-card .remove{align-self:start;background:none;border:none;color:var(--danger);font-size:18px}
 
 /* recorte manual antes de analizar */
-.crop-wrap{position:relative;max-width:100%;border-radius:var(--radius);overflow:hidden;margin-top:14px;touch-action:none}
-.crop-wrap img{width:100%;display:block;user-select:none;-webkit-user-drag:none}
+.crop-wrap{position:relative;max-width:100%;width:fit-content;margin:14px auto 0;border-radius:var(--radius);overflow:hidden;touch-action:none}
+.crop-wrap img{display:block;max-width:100%;max-height:60vh;width:auto;height:auto;user-select:none;-webkit-user-drag:none}
 .crop-box{position:absolute;border:2px solid var(--accent);box-shadow:0 0 0 9999px rgba(0,0,0,.45);cursor:move;touch-action:none}
 .crop-handle{position:absolute;width:22px;height:22px;background:var(--accent);border:2px solid #fff;border-radius:50%;transform:translate(-50%,-50%);touch-action:none}
 .crop-handle[data-corner="nw"]{left:0;top:0;cursor:nwse-resize}
@@ -593,16 +593,32 @@ function renderRevisionFoto(){
   });
   let cardsHtml = '';
   d.items.forEach((it, i)=>{
-    cardsHtml += `<div class="detect-card" id="detect-${i}">
-      <img src="${it.cropPreview||d.dataUrl}" alt="">
-      <div class="fields">
-        <select onchange="currentDetections.items[${i}].categoria=this.value">${CATEGORIAS.map(c=>`<option ${c===it.categoria?'selected':''}>${c}</option>`).join('')}</select>
-        <input value="${escAttr(it.tipo||'')}" placeholder="Tipo" oninput="currentDetections.items[${i}].tipo=this.value">
-        <input value="${escAttr(it.color||'')}" placeholder="Color" oninput="currentDetections.items[${i}].color=this.value">
-        <input value="${escAttr(it.colorSecundario||'')}" placeholder="Color secundario" oninput="currentDetections.items[${i}].colorSecundario=this.value">
-        <input class="full" value="${escAttr(it.estampado||'')}" placeholder="Estampado (opcional)" oninput="currentDetections.items[${i}].estampado=this.value">
+    const candidatos = candidatosParaPrenda(it.categoria);
+    if(it.matchId===undefined){
+      const sugerido = mejorCandidato(it, candidatos);
+      it.matchId = sugerido ? sugerido.ID : null;
+    }
+    const prendaSugerida = it.matchId ? DATA.prendas.find(p=>p.ID===it.matchId) : null;
+    const estadoMatchHtml = prendaSugerida
+      ? `<div style="display:flex;align-items:center;gap:8px;margin-top:6px;padding:8px;background:var(--accent-soft);border-radius:10px">
+           ${prendaSugerida.FotoURL?`<img src="${prendaSugerida.FotoURL}" style="width:40px;height:40px;object-fit:cover;border-radius:8px;flex:none">`:''}
+           <div style="flex:1;font-size:12px">🔁 Ya está en tu catálogo: <b>${escAttr(prendaSugerida.Tipo||prendaSugerida.Categoria)}</b><br><span class="hint">se suma a "veces usada", no se duplica</span></div>
+         </div>`
+      : `<p class="hint" style="margin-top:6px">✨ Se guardará como prenda nueva en tu catálogo.</p>`;
+    cardsHtml += `<div class="detect-card" id="detect-${i}" style="flex-direction:column;align-items:stretch">
+      <div style="display:flex;gap:10px">
+        <img src="${it.cropPreview||d.dataUrl}" alt="">
+        <div class="fields">
+          <select onchange="currentDetections.items[${i}].categoria=this.value;currentDetections.items[${i}].matchId=undefined;renderRevisionFoto()">${CATEGORIAS.map(c=>`<option ${c===it.categoria?'selected':''}>${c}</option>`).join('')}</select>
+          <input value="${escAttr(it.tipo||'')}" placeholder="Tipo" oninput="currentDetections.items[${i}].tipo=this.value">
+          <input value="${escAttr(it.color||'')}" placeholder="Color" oninput="currentDetections.items[${i}].color=this.value">
+          <input value="${escAttr(it.colorSecundario||'')}" placeholder="Color secundario" oninput="currentDetections.items[${i}].colorSecundario=this.value">
+          <input class="full" value="${escAttr(it.estampado||'')}" placeholder="Estampado (opcional)" oninput="currentDetections.items[${i}].estampado=this.value">
+        </div>
+        <button class="remove" onclick="quitarDeteccion(${i})" title="No incluir esta prenda">✕</button>
       </div>
-      <button class="remove" onclick="quitarDeteccion(${i})" title="No incluir esta prenda">✕</button>
+      ${estadoMatchHtml}
+      <button class="btn ghost" style="margin-top:6px;font-size:12px;padding:6px 10px" onclick="abrirRevisarCategoriaSubir(${i})">🔍 ${prendaSugerida?'No es esta, revisar':'Revisar'} catálogo de ${escAttr(it.categoria)} (${candidatos.length})</button>
     </div>`;
   });
   const badgeModelo = d.modelo ? `<span class="chip" style="cursor:default">🤖 ${mensajeModelo(d,'Analizado')}</span>` : '';
@@ -670,14 +686,27 @@ async function guardarDetecciones(){
   if(!d.items.length){ omitirFoto(); return; }
   const btn = document.getElementById('btnGuardarPrendas');
   if(btn){ btn.disabled = true; btn.textContent = 'Guardando…'; }
-  showToast('Guardando…');
   const origen = await apiPost('uploadImage', { imageBase64: d.base64, mimeType: d.mimeType, fileName: 'foto-'+Date.now()+'.jpg' });
   const origenUrl = origen.ok ? origen.url : '';
+  // Las que ya reconocimos en tu catálogo NO se vuelven a crear — solo se
+  // suman a "veces usada" (sin fecha: no sabemos cuándo es esta foto de
+  // verdad, ver registrarUso en el backend).
+  const prendaIdsExistentes = [];
   for(let i=0;i<d.items.length;i++){
+    const it = d.items[i];
+    if(it.matchId){ prendaIdsExistentes.push(it.matchId); continue; }
     if(btn) btn.textContent = `Generando prenda ${i+1}/${d.items.length}…`;
-    const row = await crearFilaPrenda(d.items[i], origenUrl);
+    const row = await crearFilaPrenda(it, origenUrl);
     await apiPost('saveRow', { table:'PRENDAS', row });
     DATA.prendas.push(row);
+  }
+  if(prendaIdsExistentes.length){
+    if(btn) btn.textContent = 'Registrando en el historial…';
+    const r = await apiPost('registrarUso', { prendaIds: prendaIdsExistentes, fotoUrl: origenUrl });
+    if(r.ok){
+      prendaIdsExistentes.forEach(id=>{ const p=findPrenda(id); if(p) p.VecesUsado=(Number(p.VecesUsado)||0)+1; });
+      DATA.usos.push(r.uso);
+    }
   }
   localStorage.setItem('ropa_data_cache', JSON.stringify(DATA));
   showToast('✓ Prendas guardadas');
@@ -784,7 +813,7 @@ function renderRevisionHoy(){
         <button class="remove" onclick="quitarDeteccionHoy(${i})" title="No incluir esta prenda">✕</button>
       </div>
       ${estadoMatchHtml}
-      <button class="btn ghost" style="margin-top:8px;font-size:12px;padding:6px 10px" onclick="abrirRevisarCategoria(${i})">🔍 Revisar catálogo de ${escAttr(it.categoria)} (${candidatos.length})</button>
+      <button class="btn ghost" style="margin-top:8px;font-size:12px;padding:6px 10px" onclick="abrirRevisarCategoriaHoy(${i})">🔍 Revisar catálogo de ${escAttr(it.categoria)} (${candidatos.length})</button>
     </div>`;
   });
   area.innerHTML = `${badgeModelo}${cardsHtml}
@@ -798,8 +827,10 @@ function seleccionarCandidatoHoy(i, id){ hoyDetections.items[i].matchId = id; re
 // esto obliga a una acción deliberada: abre el catálogo completo de esa
 // categoría en grande, el usuario toca la foto real que reconoce (o
 // "es nueva" si ninguna es), nada queda adivinado en silencio.
-function abrirRevisarCategoria(i){
-  const it = hoyDetections.items[i];
+// Genérico: lo usan tanto Hoy como Subir fotos — cada uno le pasa su
+// propio arreglo de items y qué hacer cuando se elige/marca como nueva.
+function abrirRevisarCategoria(items, i, alSeleccionar, alMarcarNueva){
+  const it = items[i];
   const candidatos = candidatosParaPrenda(it.categoria);
   const overlay = document.createElement('div');
   overlay.className = 'modal-overlay';
@@ -807,7 +838,7 @@ function abrirRevisarCategoria(i){
     <h3>¿Ya tienes esta prenda?</h3>
     <p class="hint">Toca la foto que sea la misma prenda real, o marca que es nueva.</p>
     <div class="grid" id="revisarGrid">
-      ${candidatos.length ? candidatos.map(p=>`<div class="card" style="cursor:pointer" onclick="seleccionarCandidatoHoy(${i},'${p.ID}');this.closest('.modal-overlay').remove()">
+      ${candidatos.length ? candidatos.map(p=>`<div class="card" style="cursor:pointer" data-id="${p.ID}">
         ${p.FotoURL?`<img class="thumb" src="${p.FotoURL}">`:`<div class="thumb ph">${CATEGORIA_ICONO[p.Categoria]||'👕'}</div>`}
         <div class="body"><div class="tipo">${escAttr(p.Tipo||p.Categoria)}</div><div class="meta">${escAttr(p.Color||'')}</div></div>
       </div>`).join('') : '<p class="hint">Todavía no tienes prendas guardadas en esta categoría.</p>'}
@@ -820,8 +851,18 @@ function abrirRevisarCategoria(i){
   document.body.appendChild(overlay);
   overlay.addEventListener('click', e=>{ if(e.target===overlay) overlay.remove(); });
   overlay.querySelector('#revisarCancelar').onclick = ()=> overlay.remove();
-  overlay.querySelector('#revisarEsNueva').onclick = ()=>{ seleccionarCandidatoHoy(i, null); overlay.remove(); };
+  overlay.querySelectorAll('#revisarGrid .card').forEach(el=>{
+    el.onclick = ()=>{ alSeleccionar(el.dataset.id); overlay.remove(); };
+  });
+  overlay.querySelector('#revisarEsNueva').onclick = ()=>{ alMarcarNueva(); overlay.remove(); };
 }
+function abrirRevisarCategoriaHoy(i){
+  abrirRevisarCategoria(hoyDetections.items, i, id=>seleccionarCandidatoHoy(i,id), ()=>seleccionarCandidatoHoy(i,null));
+}
+function abrirRevisarCategoriaSubir(i){
+  abrirRevisarCategoria(currentDetections.items, i, id=>seleccionarCandidatoSubir(i,id), ()=>seleccionarCandidatoSubir(i,null));
+}
+function seleccionarCandidatoSubir(i, id){ currentDetections.items[i].matchId = id; renderRevisionFoto(); }
 function quitarDeteccionHoy(i){ hoyDetections.items.splice(i,1); renderRevisionHoy(); }
 async function guardarRecortesHoy(){
   const d = hoyDetections;
@@ -944,16 +985,25 @@ function borrarPermanente(id){
 // con foto real de ese día cuando el registro vino del flujo "reconocer
 // con foto" en Hoy (los registros hechos a mano, sin foto, solo muestran
 // la fecha).
+// Una foto de "Subir fotos" que reconoce una prenda ya existente registra
+// el uso SIN fecha (no sabemos cuándo fue esa foto de verdad) — hay que
+// mostrar eso como "fecha desconocida" en vez de una fecha inventada o
+// "Invalid Date".
+function formatoFechaUso(fecha){
+  if(!fecha) return 'fecha desconocida';
+  const d = new Date(fecha);
+  if(isNaN(d.getTime())) return 'fecha desconocida';
+  return d.toLocaleDateString('es-MX', {day:'numeric', month:'short'});
+}
 function historialUsoHtml(p){
   const usos = DATA.usos.filter(u=>{
     let ids = []; try{ ids = JSON.parse(u.PrendaIDsJSON||'[]'); }catch(e){}
     return ids.includes(p.ID);
-  }).sort((a,b)=> new Date(b.Fecha)-new Date(a.Fecha));
+  }).sort((a,b)=> (b.Fecha?new Date(b.Fecha).getTime():0) - (a.Fecha?new Date(a.Fecha).getTime():0));
   if(!usos.length) return '<p class="hint">Todavía no hay registros de uso para esta prenda.</p>';
   return `<div class="pick-list">${usos.map(u=>{
-    const fecha = new Date(u.Fecha).toLocaleDateString('es-MX', {day:'numeric', month:'short'});
     const foto = u.FotoURL ? `<img src="${u.FotoURL}" onclick="verFotoGrande('${u.FotoURL}')" style="cursor:zoom-in">` : `<div class="ph">📅</div>`;
-    return `<div class="pick-item">${foto}<div>${fecha}</div></div>`;
+    return `<div class="pick-item">${foto}<div>${formatoFechaUso(u.Fecha)}</div></div>`;
   }).join('')}</div>`;
 }
 function abrirEditarPrenda(id){
@@ -1182,12 +1232,12 @@ async function guardarUsoHoy(){
 }
 function renderUsosRecientes(){
   const wrap = document.getElementById('usosRecientes');
-  const recientes = [...DATA.usos].sort((a,b)=> new Date(b.Fecha)-new Date(a.Fecha)).slice(0,10);
+  const recientes = [...DATA.usos].sort((a,b)=> (b.Fecha?new Date(b.Fecha).getTime():0) - (a.Fecha?new Date(a.Fecha).getTime():0)).slice(0,10);
   if(!recientes.length){ wrap.innerHTML = '<p class="hint">Sin registros todavía.</p>'; return; }
   wrap.innerHTML = recientes.map(u=>{
     let ids = []; try{ ids = JSON.parse(u.PrendaIDsJSON||'[]'); }catch(e){}
     const nombres = ids.map(id=>{ const p=findPrenda(id); return p ? (p.Tipo||p.Categoria) : '?'; }).join(', ');
-    const fecha = new Date(u.Fecha).toLocaleDateString('es-MX', {day:'numeric', month:'short'});
+    const fecha = formatoFechaUso(u.Fecha);
     return `<div class="detect-card" style="align-items:center">
       <div class="fields" style="grid-template-columns:1fr"><div><b>${fecha}</b>${u.Evento?' · '+escAttr(u.Evento):''}<br><span class="hint">${escAttr(nombres)}</span></div></div>
       <button class="remove" onclick="pedirEliminarUso('${u.ID}')">✕</button>
