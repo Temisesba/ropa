@@ -656,24 +656,45 @@ function cropDataUrl(sourceCanvas, width, height, caja){
   return canvas.toDataURL('image/jpeg', 0.85);
 }
 
+// Sube el recorte real, pide a la IA la versión "foto de catálogo" de esa
+// misma prenda (usando el recorte real como referencia, no a ciegas) y
+// arma la fila lista para guardar. Si la generación falla (Gemini no
+// genera imágenes vía Claude, no hay respaldo posible), se usa el recorte
+// real como FotoURL — nunca se bloquea el guardado por esto.
+async function crearFilaPrenda(it, origenUrl){
+  let fotoRealUrl = '';
+  if(it.caja && it.cropPreview){
+    const subCrop = await apiPost('uploadImage', { imageBase64: it.cropPreview.split(',')[1], mimeType:'image/jpeg', fileName:'prenda-'+Date.now()+'.jpg' });
+    if(subCrop.ok) fotoRealUrl = subCrop.url;
+  }
+  let fotoUrl = fotoRealUrl || origenUrl;
+  if(it.cropPreview){
+    const gen = await apiPost('generarFotoCatalogo', {
+      imageBase64: it.cropPreview.split(',')[1], mimeType:'image/jpeg',
+      categoria: it.categoria, tipo: it.tipo, color: it.color, colorSecundario: it.colorSecundario, estampado: it.estampado
+    });
+    if(gen.ok){
+      const subGen = await apiPost('uploadImage', { imageBase64: gen.imageBase64, mimeType: gen.mimeType||'image/jpeg', fileName:'catalogo-'+Date.now()+'.jpg' });
+      if(subGen.ok) fotoUrl = subGen.url;
+    }
+  }
+  return {
+    ID: uid(), Categoria: it.categoria||'Ropa superior', Tipo: it.tipo||'', Color: it.color||'',
+    ColorSecundario: it.colorSecundario||'', Estampado: it.estampado||'', Marca:'', Temporada:'',
+    Formalidad:'', FotoURL: fotoUrl, FotoRealURL: fotoRealUrl, FotoOrigenURL: origenUrl||'', FechaAlta: new Date().toISOString(),
+    UltimoUso:'', VecesUsado:0, Favorito:false, Notas:'', Papelera:false
+  };
+}
+
 async function guardarDetecciones(){
   const d = currentDetections;
   if(!d.items.length){ omitirFoto(); return; }
   showToast('Guardando…');
   const origen = await apiPost('uploadImage', { imageBase64: d.base64, mimeType: d.mimeType, fileName: 'foto-'+Date.now()+'.jpg' });
   const origenUrl = origen.ok ? origen.url : '';
-  for(const it of d.items){
-    let fotoUrl = origenUrl;
-    if(it.caja && it.cropPreview){
-      const subCrop = await apiPost('uploadImage', { imageBase64: it.cropPreview.split(',')[1], mimeType:'image/jpeg', fileName:'prenda-'+Date.now()+'.jpg' });
-      if(subCrop.ok) fotoUrl = subCrop.url;
-    }
-    const row = {
-      ID: uid(), Categoria: it.categoria||'Ropa superior', Tipo: it.tipo||'', Color: it.color||'',
-      ColorSecundario: it.colorSecundario||'', Estampado: it.estampado||'', Marca:'', Temporada:'',
-      Formalidad:'', FotoURL: fotoUrl, FotoOrigenURL: origenUrl, FechaAlta: new Date().toISOString(),
-      UltimoUso:'', VecesUsado:0, Favorito:false, Notas:'', Papelera:false
-    };
+  for(let i=0;i<d.items.length;i++){
+    showToast(`Generando prenda ${i+1}/${d.items.length}…`);
+    const row = await crearFilaPrenda(d.items[i], origenUrl);
     await apiPost('saveRow', { table:'PRENDAS', row });
     DATA.prendas.push(row);
   }
@@ -778,17 +799,8 @@ async function guardarRecortesHoy(){
   const prendaIds = [];
   for(const it of d.items){
     if(it.matchId){ prendaIds.push(it.matchId); continue; }
-    let fotoUrl = origenUrl;
-    if(it.caja && it.cropPreview){
-      const subCrop = await apiPost('uploadImage', { imageBase64: it.cropPreview.split(',')[1], mimeType:'image/jpeg', fileName:'prenda-'+Date.now()+'.jpg' });
-      if(subCrop.ok) fotoUrl = subCrop.url;
-    }
-    const row = {
-      ID: uid(), Categoria: it.categoria||'Ropa superior', Tipo: it.tipo||'', Color: it.color||'',
-      ColorSecundario: it.colorSecundario||'', Estampado: it.estampado||'', Marca:'', Temporada:'',
-      Formalidad:'', FotoURL: fotoUrl, FotoOrigenURL: origenUrl, FechaAlta: new Date().toISOString(),
-      UltimoUso:'', VecesUsado:0, Favorito:false, Notas:'', Papelera:false
-    };
+    showToast('Generando prenda nueva…');
+    const row = await crearFilaPrenda(it, origenUrl);
     await apiPost('saveRow', { table:'PRENDAS', row });
     DATA.prendas.push(row);
     prendaIds.push(row.ID);
@@ -896,8 +908,12 @@ function abrirEditarPrenda(id){
     <h3>Editar prenda</h3>
     <div class="field" style="text-align:center">
       ${p.FotoURL ? `<img id="edFotoPreview" src="${p.FotoURL}" style="max-width:100%;max-height:220px;border-radius:12px;object-fit:contain">
-      <div><button class="btn secondary" id="edRecortar" style="margin-top:8px">✂️ Recortar foto</button></div>` : `<p class="hint">Esta prenda no tiene foto</p>`}
-      ${p.FotoOrigenURL && p.FotoOrigenURL!==p.FotoURL ? `<p class="hint" style="margin-top:6px"><a href="#" onclick="event.preventDefault();verFotoGrande('${p.FotoOrigenURL}')">ver foto original completa</a></p>` : ''}
+      <div><button class="btn secondary" id="edRecortar" style="margin-top:8px">✂️ Volver a recortar</button></div>` : `<p class="hint">Esta prenda no tiene foto</p>`}
+      <p class="hint" style="margin-top:6px">
+        ${p.FotoRealURL ? `<a href="#" onclick="event.preventDefault();verFotoGrande('${p.FotoRealURL}')">ver foto real (sin generar)</a>` : ''}
+        ${p.FotoRealURL && p.FotoOrigenURL && p.FotoOrigenURL!==p.FotoRealURL ? ' · ' : ''}
+        ${p.FotoOrigenURL && p.FotoOrigenURL!==p.FotoRealURL ? `<a href="#" onclick="event.preventDefault();verFotoGrande('${p.FotoOrigenURL}')">ver foto original completa</a>` : ''}
+      </p>
       <div id="edCropArea"></div>
     </div>
     <div class="field"><label>Categoría</label><select id="edCat">${CATEGORIAS.map(c=>`<option ${c===p.Categoria?'selected':''}>${c}</option>`).join('')}</select></div>
@@ -917,7 +933,7 @@ function abrirEditarPrenda(id){
   overlay.querySelector('#edCancel').onclick = ()=> overlay.remove();
   const btnRecortar = overlay.querySelector('#edRecortar');
   if(btnRecortar) btnRecortar.onclick = async ()=>{
-    const fileId = fileIdDeUrlDrive(p.FotoURL) || fileIdDeUrlDrive(p.FotoOrigenURL);
+    const fileId = fileIdDeUrlDrive(p.FotoRealURL) || fileIdDeUrlDrive(p.FotoOrigenURL) || fileIdDeUrlDrive(p.FotoURL);
     if(!fileId){ showToast('Esta prenda no tiene foto para recortar'); return; }
     document.getElementById('edCropArea').innerHTML = '<p class="hint">Cargando foto…</p>';
     const r = await apiPost('descargarImagenDrive', { fileId });
@@ -975,13 +991,23 @@ async function confirmarRecorteEdicion(p, recortada){
   document.getElementById('edCropArea').innerHTML = '<p class="hint">Guardando recorte…</p>';
   const subida = await apiPost('uploadImage', { imageBase64: recortada.base64, mimeType: recortada.mimeType, fileName: 'prenda-'+Date.now()+'.jpg' });
   if(!subida.ok){ document.getElementById('edCropArea').innerHTML = `<p class="hint">No se pudo guardar: ${subida.error||'sin conexión'}</p>`; return; }
+  p.FotoRealURL = subida.url;
   p.FotoURL = subida.url;
+  document.getElementById('edCropArea').innerHTML = '<p class="hint">Generando foto de catálogo…</p>';
+  const gen = await apiPost('generarFotoCatalogo', {
+    imageBase64: recortada.base64, mimeType: recortada.mimeType,
+    categoria: p.Categoria, tipo: p.Tipo, color: p.Color, colorSecundario: p.ColorSecundario, estampado: p.Estampado
+  });
+  if(gen.ok){
+    const subGen = await apiPost('uploadImage', { imageBase64: gen.imageBase64, mimeType: gen.mimeType||'image/jpeg', fileName:'catalogo-'+Date.now()+'.jpg' });
+    if(subGen.ok) p.FotoURL = subGen.url;
+  }
   await apiPost('saveRow', { table:'PRENDAS', row:p });
   localStorage.setItem('ropa_data_cache', JSON.stringify(DATA));
   renderCatalogo();
   document.getElementById('edCropArea').innerHTML = '';
   const preview = document.getElementById('edFotoPreview');
-  if(preview) preview.src = subida.url;
+  if(preview) preview.src = p.FotoURL;
   showToast('Foto actualizada');
 }
 
