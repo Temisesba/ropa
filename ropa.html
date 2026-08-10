@@ -539,63 +539,14 @@ async function analizarFotoRecortada(recortada){
 // Prepara de antemano el recorte que se va a mostrar Y guardar de cada
 // prenda detectada — así renderRevisionFoto solo lee it.cropPreview en
 // vez de recalcular el recorte cada vez que se re-dibuja la pantalla.
+// (Antes probaba un recorte con máscara de segmentación de Gemini para
+// quitar el fondo aquí mismo — se quitó: multiplicaba el tiempo de
+// respuesta de la IA de ~10s a minutos por foto, y generarFotoCatalogo ya
+// da un resultado mejor que ese recorte con máscara jamás dio.)
 async function prepararRecortes(d){
   for(const it of d.items){
-    if(!it.caja){ it.cropPreview = d.dataUrl; continue; }
-    it.cropPreview = it.mask
-      ? await recorteConMascara(d.canvas, d.width, d.height, it.caja, it.mask)
-      : cropDataUrl(d.canvas, d.width, d.height, it.caja);
+    it.cropPreview = it.caja ? cropDataUrl(d.canvas, d.width, d.height, it.caja) : d.dataUrl;
   }
-}
-// Si Gemini devolvió una máscara de segmentación para la prenda, la usa
-// como "alfa" sobre el recorte real para dejar solo la prenda visible
-// sobre fondo blanco (estilo catálogo de tienda). La máscara puede venir
-// en cualquier resolución — se estira al tamaño del recorte antes de
-// leer su brillo, así no depende de qué tamaño exacto haya mandado la IA.
-// Si algo falla (máscara inválida, etc.) cae al recorte normal sin quitar
-// fondo — nunca rompe el flujo.
-function recorteConMascara(sourceCanvas, width, height, caja, maskBase64){
-  return new Promise(resolve=>{
-    const fallback = ()=> resolve(cropDataUrl(sourceCanvas, width, height, caja));
-    const [ymin,xmin,ymax,xmax] = caja;
-    const sx = Math.max(0, Math.round(xmin/1000*width));
-    const sy = Math.max(0, Math.round(ymin/1000*height));
-    const sw = Math.max(1, Math.round((xmax-xmin)/1000*width));
-    const sh = Math.max(1, Math.round((ymax-ymin)/1000*height));
-    const maskImg = new Image();
-    maskImg.onerror = fallback;
-    maskImg.onload = ()=>{
-      try{
-        const cropCanvas = document.createElement('canvas');
-        cropCanvas.width = sw; cropCanvas.height = sh;
-        const cropCtx = cropCanvas.getContext('2d');
-        cropCtx.drawImage(sourceCanvas, sx, sy, sw, sh, 0, 0, sw, sh);
-        const cropData = cropCtx.getImageData(0, 0, sw, sh).data;
-
-        const maskCanvas = document.createElement('canvas');
-        maskCanvas.width = sw; maskCanvas.height = sh;
-        const maskCtx = maskCanvas.getContext('2d');
-        maskCtx.drawImage(maskImg, 0, 0, sw, sh);
-        const maskData = maskCtx.getImageData(0, 0, sw, sh).data;
-
-        const outCanvas = document.createElement('canvas');
-        outCanvas.width = sw; outCanvas.height = sh;
-        const outCtx = outCanvas.getContext('2d');
-        const outImg = outCtx.createImageData(sw, sh);
-        for(let i=0; i<cropData.length; i+=4){
-          const alpha = maskData[i]/255; // máscara en gris: r=g=b=brillo
-          outImg.data[i]   = Math.round(cropData[i]*alpha   + 255*(1-alpha));
-          outImg.data[i+1] = Math.round(cropData[i+1]*alpha + 255*(1-alpha));
-          outImg.data[i+2] = Math.round(cropData[i+2]*alpha + 255*(1-alpha));
-          outImg.data[i+3] = 255;
-        }
-        outCtx.putImageData(outImg, 0, 0);
-        resolve(outCanvas.toDataURL('image/jpeg', 0.9));
-      }catch(e){ fallback(); }
-    };
-    const prefijo = maskBase64.indexOf('data:')===0 ? '' : 'data:image/png;base64,';
-    maskImg.src = prefijo + maskBase64;
-  });
 }
 
 function renderRevisionFoto(){
