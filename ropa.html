@@ -1,0 +1,780 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Ropa — mi clóset</title>
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#b5563c">
+<style>
+:root{
+  --bg:#faf5f0; --bg-card:#ffffff; --text:#2e2a28; --text-soft:#7a736c;
+  --accent:#b5563c; --accent-soft:#f1ddd3; --border:#e8ddd2;
+  --danger:#c0392b; --danger-soft:#f6dcd8; --success:#2f7a4f; --success-soft:#dcefe2;
+  --radius:14px; --shadow:0 2px 10px rgba(60,40,25,.08);
+}
+@media (prefers-color-scheme: dark){
+  :root{ --bg:#211d1b; --bg-card:#2b2623; --text:#f2e9e1; --text-soft:#b3a79a; --accent:#e08a6d; --accent-soft:#3c2e27; --border:#463a33; --danger-soft:#4a2724; --success-soft:#1f3a2a; }
+}
+*{box-sizing:border-box}
+body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;background:var(--bg);color:var(--text);padding-bottom:76px}
+button,input,select,textarea{font:inherit;color:inherit}
+input,select,textarea{background:var(--bg-card);border:1px solid var(--border);border-radius:10px;padding:9px 11px;width:100%}
+button{cursor:pointer}
+.hidden{display:none!important}
+h1,h2,h3{margin:0 0 8px}
+.hint{color:var(--text-soft);font-size:13px}
+
+/* setup */
+#setupScreen{min-height:100vh;display:flex;align-items:center;justify-content:center;padding:24px}
+.setup-card{max-width:420px;width:100%;background:var(--bg-card);border-radius:var(--radius);padding:24px;box-shadow:var(--shadow)}
+.setup-card label{display:block;margin:14px 0 4px;font-size:13px;color:var(--text-soft)}
+.setup-err{color:var(--danger);font-size:13px;margin-top:8px;min-height:16px}
+.btn{background:var(--accent);color:#fff;border:none;border-radius:10px;padding:10px 16px;font-weight:600}
+.btn.secondary{background:var(--accent-soft);color:var(--accent)}
+.btn.danger{background:var(--danger);color:#fff}
+.btn.ghost{background:transparent;border:1px solid var(--border)}
+.btn:disabled{opacity:.5;cursor:default}
+
+/* header */
+header{position:sticky;top:0;z-index:20;background:var(--bg);border-bottom:1px solid var(--border);padding:12px 16px;display:flex;align-items:center;justify-content:space-between;gap:8px}
+header .brand{font-weight:700;font-size:17px}
+#connBanner{background:var(--danger-soft);color:var(--danger);font-size:13px;text-align:center;padding:6px;display:none}
+#connBanner.show{display:block}
+main{max-width:900px;margin:0 auto;padding:16px}
+.screen{display:none}
+.screen.active{display:block}
+
+/* bottom nav */
+nav.tabbar{position:fixed;left:0;right:0;bottom:0;z-index:20;display:flex;background:var(--bg-card);border-top:1px solid var(--border);padding:6px 4px calc(6px + env(safe-area-inset-bottom))}
+nav.tabbar button{flex:1;display:flex;flex-direction:column;align-items:center;gap:2px;background:none;border:none;padding:6px 2px;border-radius:10px;color:var(--text-soft);font-size:11px}
+nav.tabbar button.active{color:var(--accent);background:var(--accent-soft)}
+nav.tabbar button .ic{font-size:19px}
+
+/* cards / grid */
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:12px;margin-top:12px}
+.card{background:var(--bg-card);border-radius:var(--radius);box-shadow:var(--shadow);overflow:hidden;display:flex;flex-direction:column}
+.card .thumb{width:100%;aspect-ratio:1;object-fit:cover;background:var(--accent-soft)}
+.card .thumb.ph{display:flex;align-items:center;justify-content:center;font-size:36px}
+.card .body{padding:8px 10px 10px}
+.card .tipo{font-weight:600;font-size:14px}
+.card .meta{color:var(--text-soft);font-size:12px;margin-top:2px}
+.card .row-actions{display:flex;gap:6px;margin-top:8px}
+.card .row-actions button{flex:1;padding:6px;border-radius:8px;border:1px solid var(--border);background:var(--bg-card);font-size:15px}
+.card .fav{color:var(--accent)}
+
+.chips{display:flex;gap:6px;overflow-x:auto;padding-bottom:4px;margin:12px 0}
+.chip{flex:none;padding:6px 12px;border-radius:999px;border:1px solid var(--border);background:var(--bg-card);font-size:13px;white-space:nowrap}
+.chip.active{background:var(--accent);border-color:var(--accent);color:#fff}
+
+.searchbar{display:flex;gap:8px}
+.searchbar input{flex:1}
+
+/* modal */
+.modal-overlay{position:fixed;inset:0;background:rgba(20,15,12,.5);display:flex;align-items:center;justify-content:center;z-index:100;padding:16px}
+.modal{background:var(--bg-card);border-radius:var(--radius);padding:20px;max-width:460px;width:100%;max-height:88vh;overflow:auto;box-shadow:var(--shadow)}
+.modal h3{margin-bottom:12px}
+.modal .field{margin-bottom:12px}
+.modal .field label{display:block;font-size:13px;color:var(--text-soft);margin-bottom:4px}
+.modal .actions{display:flex;gap:8px;justify-content:flex-end;margin-top:16px}
+.confirm-modal p{margin:0 0 4px}
+
+/* toast */
+#toast{position:fixed;left:50%;bottom:88px;transform:translate(-50%,20px);background:var(--text);color:var(--bg);padding:10px 16px;border-radius:999px;font-size:13px;opacity:0;pointer-events:none;transition:.25s;z-index:200}
+#toast.show{opacity:1;transform:translate(-50%,0)}
+
+/* subir fotos */
+.upload-drop{border:2px dashed var(--border);border-radius:var(--radius);padding:28px 16px;text-align:center;color:var(--text-soft)}
+.upload-progress{margin-top:14px;background:var(--accent-soft);border-radius:999px;height:8px;overflow:hidden}
+.upload-progress .bar{height:100%;background:var(--accent);width:0%;transition:.3s}
+.review-photo{position:relative;max-width:100%;border-radius:var(--radius);overflow:hidden;margin-top:14px}
+.review-photo img{width:100%;display:block}
+.review-photo .box{position:absolute;border:2px solid var(--accent);border-radius:4px;background:rgba(181,86,60,.12)}
+.detect-card{background:var(--bg-card);border-radius:12px;box-shadow:var(--shadow);padding:12px;margin-top:10px;display:flex;gap:10px}
+.detect-card img{width:64px;height:64px;object-fit:cover;border-radius:8px;background:var(--accent-soft)}
+.detect-card .fields{flex:1;display:grid;grid-template-columns:1fr 1fr;gap:6px}
+.detect-card .fields input,.detect-card .fields select{padding:6px 8px;font-size:13px}
+.detect-card .fields .full{grid-column:1/-1}
+.detect-card .remove{align-self:start;background:none;border:none;color:var(--danger);font-size:18px}
+
+/* outfits */
+.outfit-card{background:var(--bg-card);border-radius:var(--radius);box-shadow:var(--shadow);padding:14px;margin-top:12px}
+.outfit-items{display:flex;gap:8px;overflow-x:auto;margin:10px 0}
+.outfit-items img{width:64px;height:64px;object-fit:cover;border-radius:8px;flex:none;background:var(--accent-soft)}
+.outfit-motivo{font-size:13px;color:var(--text-soft)}
+
+/* hoy */
+.pick-group h3{margin-top:18px;font-size:14px;color:var(--text-soft);text-transform:uppercase;letter-spacing:.04em}
+.pick-list{display:flex;gap:8px;overflow-x:auto;padding-bottom:4px}
+.pick-item{flex:none;width:76px;text-align:center;font-size:11px;cursor:pointer}
+.pick-item img{width:76px;height:76px;object-fit:cover;border-radius:10px;border:3px solid transparent}
+.pick-item.selected img{border-color:var(--accent)}
+</style>
+</head>
+<body>
+
+<div id="setupScreen">
+  <div class="setup-card">
+    <h1>👗 Ropa</h1>
+    <p class="hint">Vincula tu Google Sheet personal y la Web App de Apps Script. Se guardan solo en este dispositivo — nadie más puede entrar sin estos dos datos.</p>
+    <label for="setupSheet">Enlace de tu Google Sheet</label>
+    <input type="url" id="setupSheet" placeholder="https://docs.google.com/spreadsheets/d/…">
+    <label for="setupGas">URL de la Web App (Apps Script)</label>
+    <input type="url" id="setupGas" placeholder="https://script.google.com/macros/s/…/exec">
+    <div class="setup-err" id="setupErr"></div>
+    <div style="margin-top:16px"><button class="btn" onclick="finishSetup()">Vincular y entrar</button></div>
+    <p class="hint">La primera vez que se guarde algo, la app crea sola las pestañas que necesita dentro de tu Sheet.</p>
+  </div>
+</div>
+
+<div id="app" class="hidden">
+  <header>
+    <span class="brand">👗 Ropa</span>
+    <span class="hint" id="headerHint"></span>
+  </header>
+  <div id="connBanner">Sin conexión — viendo la última copia guardada</div>
+
+  <main>
+    <section class="screen" id="screen-subir">
+      <h2>Subir fotos</h2>
+      <p class="hint">Sube fotos donde se vea tu ropa (selfies, outfits, tu clóset). La IA detecta cada prenda por foto y tú confirmas antes de guardar.</p>
+      <div class="upload-drop">
+        <input type="file" id="fileInput" accept="image/*" multiple capture="environment" style="display:none" onchange="onFilesSelected(this.files)">
+        <button class="btn" onclick="document.getElementById('fileInput').click()">📷 Elegir fotos</button>
+        <p class="hint" style="margin-top:10px">Puedes elegir varias a la vez</p>
+      </div>
+      <div id="uploadProgressWrap" class="hidden">
+        <p class="hint" id="uploadProgressText"></p>
+        <div class="upload-progress"><div class="bar" id="uploadProgressBar"></div></div>
+      </div>
+      <div id="reviewArea"></div>
+    </section>
+
+    <section class="screen" id="screen-catalogo">
+      <h2>Catálogo</h2>
+      <div class="searchbar">
+        <input type="search" id="catSearch" placeholder="Buscar por tipo, color, marca…" oninput="renderCatalogo()">
+        <button class="btn ghost" onclick="toggleTrash()" id="btnTrash">🗑</button>
+      </div>
+      <div class="chips" id="catChips"></div>
+      <div class="grid" id="catGrid"></div>
+    </section>
+
+    <section class="screen" id="screen-hoy">
+      <h2>Qué me puse hoy</h2>
+      <div class="field"><label class="hint">Evento (opcional)</label><input type="text" id="hoyEvento" placeholder="Trabajo, cita, casual…"></div>
+      <div id="hoyPickGroups"></div>
+      <button class="btn" style="margin-top:14px" onclick="guardarUsoHoy()">Guardar</button>
+      <h3 style="margin-top:26px">Registros recientes</h3>
+      <div id="usosRecientes"></div>
+    </section>
+
+    <section class="screen" id="screen-sugerencias">
+      <h2>Sugerencias</h2>
+      <div class="field"><label class="hint">Evento</label>
+        <select id="sugEvento"><option>Casual</option><option>Trabajo</option><option>Formal</option><option>Deportivo</option><option>Cita</option><option>Fiesta</option><option>Otro</option></select>
+      </div>
+      <div class="field"><label class="hint">Clima</label>
+        <div style="display:flex;gap:8px">
+          <input type="text" id="sugClima" placeholder="Ej: 22°C, soleado">
+          <button class="btn secondary" onclick="usarClimaAutomatico()">📍 Usar mi ubicación</button>
+        </div>
+      </div>
+      <button class="btn" onclick="pedirSugerencias()">✨ Pedir sugerencias</button>
+      <div id="sugResultados"></div>
+    </section>
+
+    <section class="screen" id="screen-olvidados">
+      <h2>Llevo mucho sin usar</h2>
+      <div class="field"><label class="hint">Mostrar prendas sin usar hace más de…</label>
+        <select id="olvidadosDias" onchange="renderOlvidados()">
+          <option value="30">30 días</option>
+          <option value="60" selected>60 días</option>
+          <option value="90">90 días</option>
+          <option value="180">6 meses</option>
+        </select>
+      </div>
+      <div class="grid" id="olvidadosGrid"></div>
+    </section>
+
+    <section class="screen" id="screen-perfil">
+      <h2>Perfil</h2>
+      <div class="field"><label class="hint">Tono de piel</label>
+        <select id="perfilTono"><option value="">Sin definir</option><option>Claro</option><option>Medio</option><option>Moreno</option><option>Oscuro</option></select>
+      </div>
+      <div class="field"><label class="hint">Subtono</label>
+        <select id="perfilSubtono"><option value="">Sin definir</option><option>Frío</option><option>Cálido</option><option>Neutro</option></select>
+      </div>
+      <div class="field"><label class="hint">Ciudad (para el clima)</label><input type="text" id="perfilCiudad" placeholder="Ciudad de México"></div>
+      <button class="btn" onclick="guardarPerfil()">Guardar perfil</button>
+      <h3 style="margin-top:26px">Conexión</h3>
+      <p class="hint" id="perfilConexionInfo"></p>
+    </section>
+  </main>
+
+  <nav class="tabbar">
+    <button data-tab="subir" onclick="switchTab('subir')"><span class="ic">📷</span>Subir</button>
+    <button data-tab="catalogo" onclick="switchTab('catalogo')"><span class="ic">🗂️</span>Catálogo</button>
+    <button data-tab="hoy" onclick="switchTab('hoy')"><span class="ic">✅</span>Hoy</button>
+    <button data-tab="sugerencias" onclick="switchTab('sugerencias')"><span class="ic">✨</span>Ideas</button>
+    <button data-tab="olvidados" onclick="switchTab('olvidados')"><span class="ic">⏳</span>Olvidados</button>
+    <button data-tab="perfil" onclick="switchTab('perfil')"><span class="ic">⚙️</span>Perfil</button>
+  </nav>
+</div>
+
+<div id="toast"></div>
+
+<script>
+// ============================================================
+//  Estado y configuración
+// ============================================================
+let GAS_URL = localStorage.getItem('ropa_gas_url') || '';
+let SHEET_ID = localStorage.getItem('ropa_sheet_id') || '';
+let DATA = { prendas: [], usos: [], outfits_sugeridos: [], perfil: [] };
+let showTrash = false;
+let activeCategoria = 'Todas';
+
+const CATEGORIAS = ['Calzado','Ropa superior','Ropa inferior','Vestidos','Abrigos','Accesorios','Bolsos','Ropa interior','Deportiva'];
+const CATEGORIA_ICONO = {'Calzado':'👟','Ropa superior':'👕','Ropa inferior':'👖','Vestidos':'👗','Abrigos':'🧥','Accesorios':'🧣','Bolsos':'👜','Ropa interior':'🩲','Deportiva':'🏃'};
+const FORMALIDADES = ['Casual','Trabajo','Formal','Deportivo','Fiesta'];
+
+function esVerdadero(v){ return v===true || String(v).toLowerCase()==='true'; }
+function uid(){ return (crypto.randomUUID ? crypto.randomUUID() : 'id-'+Date.now()+'-'+Math.random().toString(36).slice(2)); }
+function showToast(msg){ const t=document.getElementById('toast'); t.textContent=msg; t.classList.add('show'); clearTimeout(window._toastT); window._toastT=setTimeout(()=>t.classList.remove('show'),2600); }
+
+// ============================================================
+//  Comunicación con el backend
+// ============================================================
+function needsSetup(){ return !GAS_URL || !SHEET_ID; }
+async function apiPost(action, params){
+  if(needsSetup()) return { ok:false, error:'sin vincular' };
+  const body = Object.assign({ action, sheetId: SHEET_ID }, params||{});
+  try{
+    const f = new FormData(); f.append('payload', JSON.stringify(body));
+    const r = await fetch(GAS_URL, { method:'POST', body:f });
+    if(!r.ok) throw new Error('HTTP '+r.status);
+    const data = await r.json();
+    setConnBanner(false);
+    return data;
+  }catch(e){
+    setConnBanner(true);
+    return { ok:false, error: e.message||'sin conexión' };
+  }
+}
+function setConnBanner(show){ document.getElementById('connBanner').classList.toggle('show', show); }
+
+function extractSheetId(url){
+  const m = String(url||'').match(/\/d\/([a-zA-Z0-9-_]+)/);
+  return m ? m[1] : (String(url||'').match(/^[a-zA-Z0-9-_]{20,}$/) ? url.trim() : '');
+}
+function finishSetup(){
+  const sheetUrl = document.getElementById('setupSheet').value.trim();
+  const gasUrl = document.getElementById('setupGas').value.trim();
+  const err = document.getElementById('setupErr');
+  const id = extractSheetId(sheetUrl);
+  if(!id){ err.textContent='No pude leer el ID de ese enlace de Sheets — revisa que sea el link completo.'; return; }
+  if(!/^https:\/\/script\.google\.com\/macros\/s\/.+\/exec$/.test(gasUrl)){ err.textContent='La URL de la Web App debe terminar en /exec'; return; }
+  SHEET_ID = id; GAS_URL = gasUrl;
+  localStorage.setItem('ropa_sheet_id', SHEET_ID);
+  localStorage.setItem('ropa_gas_url', GAS_URL);
+  err.textContent = 'Conectando…';
+  apiPost('init', {}).then(r=>{
+    if(r && r.ok){ DATA = normalizeData(r.data); localStorage.setItem('ropa_data_cache', JSON.stringify(DATA)); boot(); }
+    else { err.textContent = 'No se pudo conectar: '+((r&&r.error)||'revisa los enlaces'); }
+  });
+}
+function normalizeData(d){
+  return { prendas: d.prendas||[], usos: d.usos||[], outfits_sugeridos: d.outfits_sugeridos||[], perfil: d.perfil||[] };
+}
+
+function boot(){
+  document.getElementById('setupScreen').classList.add('hidden');
+  document.getElementById('app').classList.remove('hidden');
+  const cached = localStorage.getItem('ropa_data_cache');
+  if(cached){ try{ DATA = normalizeData(JSON.parse(cached)); }catch(e){} }
+  switchTab('subir');
+  refreshData();
+  if('serviceWorker' in navigator){ navigator.serviceWorker.register('sw.js').catch(()=>{}); }
+  window.addEventListener('online', refreshData);
+}
+async function refreshData(){
+  const r = await apiPost('getAll', {});
+  if(r && r.ok){
+    DATA = normalizeData(r.data);
+    localStorage.setItem('ropa_data_cache', JSON.stringify(DATA));
+    renderAllScreens();
+  }
+}
+function renderAllScreens(){
+  renderCatalogo(); renderHoy(); renderOlvidados(); renderPerfilScreen();
+}
+
+function switchTab(name){
+  document.querySelectorAll('.screen').forEach(s=>s.classList.remove('active'));
+  document.getElementById('screen-'+name).classList.add('active');
+  document.querySelectorAll('nav.tabbar button').forEach(b=>b.classList.toggle('active', b.dataset.tab===name));
+  if(name==='catalogo') renderCatalogo();
+  if(name==='hoy') renderHoy();
+  if(name==='olvidados') renderOlvidados();
+  if(name==='perfil') renderPerfilScreen();
+}
+
+// ============================================================
+//  Modal genérico de confirmación — usado por TODOS los botones
+//  de eliminar de la app.
+// ============================================================
+function confirmarEliminar(mensaje, onConfirmar){
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay';
+  overlay.innerHTML = `<div class="modal confirm-modal">
+    <h3>¿Eliminar?</h3>
+    <p>${mensaje}</p>
+    <div class="actions">
+      <button class="btn ghost" id="cnCancel">Cancelar</button>
+      <button class="btn danger" id="cnOk">Eliminar</button>
+    </div>
+  </div>`;
+  document.body.appendChild(overlay);
+  overlay.querySelector('#cnCancel').onclick = ()=> overlay.remove();
+  overlay.addEventListener('click', e=>{ if(e.target===overlay) overlay.remove(); });
+  overlay.querySelector('#cnOk').onclick = ()=>{ overlay.remove(); onConfirmar(); };
+}
+
+// ============================================================
+//  Subir fotos + extracción con IA
+// ============================================================
+let uploadQueue = [];
+let uploadIndex = 0;
+let currentDetections = null; // { file, dataUrl, width, height, base64, mimeType, items:[...] }
+
+function onFilesSelected(fileList){
+  uploadQueue = Array.from(fileList);
+  uploadIndex = 0;
+  if(!uploadQueue.length) return;
+  document.getElementById('uploadProgressWrap').classList.remove('hidden');
+  procesarSiguienteFoto();
+}
+function actualizarProgreso(){
+  const total = uploadQueue.length;
+  document.getElementById('uploadProgressText').textContent = `Foto ${Math.min(uploadIndex+1,total)}/${total}`;
+  document.getElementById('uploadProgressBar').style.width = Math.round((uploadIndex/total)*100)+'%';
+}
+function resizeImageFile(file, maxDim, quality){
+  return new Promise((resolve, reject)=>{
+    const reader = new FileReader();
+    reader.onerror = reject;
+    reader.onload = ()=>{
+      const img = new Image();
+      img.onerror = reject;
+      img.onload = ()=>{
+        let w = img.width, h = img.height;
+        if(w > maxDim || h > maxDim){
+          if(w >= h){ h = Math.round(h*maxDim/w); w = maxDim; } else { w = Math.round(w*maxDim/h); h = maxDim; }
+        }
+        const canvas = document.createElement('canvas');
+        canvas.width = w; canvas.height = h;
+        canvas.getContext('2d').drawImage(img, 0, 0, w, h);
+        const dataUrl = canvas.toDataURL('image/jpeg', quality);
+        resolve({ dataUrl, width:w, height:h, base64: dataUrl.split(',')[1], mimeType:'image/jpeg', canvas });
+      };
+      img.src = reader.result;
+    };
+    reader.readAsDataURL(file);
+  });
+}
+async function procesarSiguienteFoto(){
+  if(uploadIndex >= uploadQueue.length){
+    document.getElementById('uploadProgressWrap').classList.add('hidden');
+    document.getElementById('reviewArea').innerHTML = '';
+    showToast('Listo — todas las fotos procesadas');
+    return;
+  }
+  actualizarProgreso();
+  const file = uploadQueue[uploadIndex];
+  document.getElementById('reviewArea').innerHTML = '<p class="hint">Analizando foto con IA…</p>';
+  const resized = await resizeImageFile(file, 1280, 0.85);
+  const r = await apiPost('extraerPrendas', { imageBase64: resized.base64, mimeType: resized.mimeType });
+  if(!r.ok){
+    document.getElementById('reviewArea').innerHTML = `<p class="hint">No se pudo analizar esta foto (${r.error||'sin conexión'}).</p>
+      <button class="btn secondary" onclick="omitirFoto()">Omitir esta foto</button>
+      <button class="btn" onclick="reintentarFoto()">Reintentar</button>`;
+    return;
+  }
+  currentDetections = { file, ...resized, items: (r.items||[]).map(it=>({ ...it, incluir:true })) };
+  renderRevisionFoto();
+}
+function omitirFoto(){ uploadIndex++; procesarSiguienteFoto(); }
+function reintentarFoto(){ procesarSiguienteFoto(); }
+
+function renderRevisionFoto(){
+  const d = currentDetections;
+  const area = document.getElementById('reviewArea');
+  if(!d.items.length){
+    area.innerHTML = `<p class="hint">No se detectaron prendas claras en esta foto.</p>
+      <button class="btn secondary" onclick="omitirFoto()">Siguiente foto</button>`;
+    return;
+  }
+  let boxesHtml = '';
+  d.items.forEach((it, i)=>{
+    if(!it.caja) return;
+    const [ymin,xmin,ymax,xmax] = it.caja;
+    boxesHtml += `<div class="box" style="left:${xmin/10}%;top:${ymin/10}%;width:${(xmax-xmin)/10}%;height:${(ymax-ymin)/10}%"></div>`;
+  });
+  let cardsHtml = '';
+  d.items.forEach((it, i)=>{
+    const crop = it.caja ? cropDataUrl(d.canvas, d.width, d.height, it.caja) : d.dataUrl;
+    cardsHtml += `<div class="detect-card" id="detect-${i}">
+      <img src="${crop}" alt="">
+      <div class="fields">
+        <select onchange="currentDetections.items[${i}].categoria=this.value">${CATEGORIAS.map(c=>`<option ${c===it.categoria?'selected':''}>${c}</option>`).join('')}</select>
+        <input value="${escAttr(it.tipo||'')}" placeholder="Tipo" oninput="currentDetections.items[${i}].tipo=this.value">
+        <input value="${escAttr(it.color||'')}" placeholder="Color" oninput="currentDetections.items[${i}].color=this.value">
+        <input value="${escAttr(it.colorSecundario||'')}" placeholder="Color secundario" oninput="currentDetections.items[${i}].colorSecundario=this.value">
+        <input class="full" value="${escAttr(it.estampado||'')}" placeholder="Estampado (opcional)" oninput="currentDetections.items[${i}].estampado=this.value">
+      </div>
+      <button class="remove" onclick="quitarDeteccion(${i})" title="No incluir esta prenda">✕</button>
+    </div>`;
+  });
+  area.innerHTML = `
+    <div class="review-photo"><img src="${d.dataUrl}">${boxesHtml}</div>
+    <p class="hint" style="margin-top:10px">Revisa y corrige lo que haga falta antes de guardar</p>
+    ${cardsHtml}
+    <div style="display:flex;gap:8px;margin-top:14px">
+      <button class="btn secondary" onclick="omitirFoto()">Descartar foto</button>
+      <button class="btn" onclick="guardarDetecciones()">Guardar prendas</button>
+    </div>`;
+}
+function escAttr(s){ return String(s).replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;'); }
+function quitarDeteccion(i){ currentDetections.items.splice(i,1); renderRevisionFoto(); }
+// sourceCanvas es el <canvas> ya renderizado que devolvió resizeImageFile
+// — se usa directo como fuente de drawImage (síncrono, sin decodificar
+// nada) en vez de crear un <img> nuevo desde el dataURL, que solo termina
+// de decodificar de forma ASÍNCRONA y dejaría el recorte en blanco si se
+// dibuja antes de que cargue.
+function cropDataUrl(sourceCanvas, width, height, caja){
+  const [ymin,xmin,ymax,xmax] = caja;
+  const sx = Math.max(0, Math.round(xmin/1000*width));
+  const sy = Math.max(0, Math.round(ymin/1000*height));
+  const sw = Math.max(1, Math.round((xmax-xmin)/1000*width));
+  const sh = Math.max(1, Math.round((ymax-ymin)/1000*height));
+  const canvas = document.createElement('canvas');
+  canvas.width = sw; canvas.height = sh;
+  canvas.getContext('2d').drawImage(sourceCanvas, sx, sy, sw, sh, 0, 0, sw, sh);
+  return canvas.toDataURL('image/jpeg', 0.85);
+}
+
+async function guardarDetecciones(){
+  const d = currentDetections;
+  if(!d.items.length){ omitirFoto(); return; }
+  showToast('Guardando…');
+  const origen = await apiPost('uploadImage', { imageBase64: d.base64, mimeType: d.mimeType, fileName: 'foto-'+Date.now()+'.jpg' });
+  const origenUrl = origen.ok ? origen.url : '';
+  for(const it of d.items){
+    let fotoUrl = origenUrl;
+    if(it.caja){
+      const cropUrl = cropDataUrl(d.canvas, d.width, d.height, it.caja);
+      const subCrop = await apiPost('uploadImage', { imageBase64: cropUrl.split(',')[1], mimeType:'image/jpeg', fileName:'prenda-'+Date.now()+'.jpg' });
+      if(subCrop.ok) fotoUrl = subCrop.url;
+    }
+    const row = {
+      ID: uid(), Categoria: it.categoria||'Ropa superior', Tipo: it.tipo||'', Color: it.color||'',
+      ColorSecundario: it.colorSecundario||'', Estampado: it.estampado||'', Marca:'', Temporada:'',
+      Formalidad:'', FotoURL: fotoUrl, FotoOrigenURL: origenUrl, FechaAlta: new Date().toISOString(),
+      UltimoUso:'', VecesUsado:0, Favorito:false, Notas:'', Papelera:false
+    };
+    await apiPost('saveRow', { table:'PRENDAS', row });
+    DATA.prendas.push(row);
+  }
+  localStorage.setItem('ropa_data_cache', JSON.stringify(DATA));
+  showToast('Prendas guardadas');
+  uploadIndex++;
+  procesarSiguienteFoto();
+}
+
+// ============================================================
+//  Catálogo
+// ============================================================
+function toggleTrash(){ showTrash = !showTrash; document.getElementById('btnTrash').classList.toggle('active', showTrash); renderCatalogo(); }
+function diasDesde(fechaISO){
+  if(!fechaISO) return null;
+  const ms = Date.now() - new Date(fechaISO).getTime();
+  return Math.floor(ms/86400000);
+}
+function renderCatalogo(){
+  const chips = document.getElementById('catChips');
+  chips.innerHTML = ['Todas', ...CATEGORIAS].map(c=>
+    `<button class="chip ${c===activeCategoria?'active':''}" onclick="activeCategoria='${c}';renderCatalogo()">${c==='Todas'?'Todas':CATEGORIA_ICONO[c]+' '+c}</button>`
+  ).join('');
+  const q = (document.getElementById('catSearch').value||'').toLowerCase();
+  let items = DATA.prendas.filter(p=> esVerdadero(p.Papelera) === showTrash);
+  if(activeCategoria!=='Todas') items = items.filter(p=>p.Categoria===activeCategoria);
+  if(q) items = items.filter(p=> [p.Tipo,p.Color,p.Marca,p.ColorSecundario].join(' ').toLowerCase().includes(q));
+  const grid = document.getElementById('catGrid');
+  if(!items.length){ grid.innerHTML = `<p class="hint">${showTrash?'La papelera está vacía.':'Todavía no hay prendas aquí — sube fotos para empezar.'}</p>`; return; }
+  grid.innerHTML = items.map(p=>{
+    const dias = diasDesde(p.UltimoUso);
+    const usoTxt = p.UltimoUso ? (dias===0?'usada hoy':`hace ${dias} día${dias===1?'':'s'}`) : 'nunca usada';
+    const foto = p.FotoURL ? `<img class="thumb" src="${p.FotoURL}" loading="lazy">` : `<div class="thumb ph">${CATEGORIA_ICONO[p.Categoria]||'👕'}</div>`;
+    return `<div class="card">
+      ${foto}
+      <div class="body">
+        <div class="tipo">${escAttr(p.Tipo||p.Categoria)}</div>
+        <div class="meta">${escAttr(p.Color||'')} · ${Number(p.VecesUsado)||0} usos · ${usoTxt}</div>
+        <div class="row-actions">
+          <button class="${esVerdadero(p.Favorito)?'fav':''}" onclick="toggleFavorito('${p.ID}')" title="Favorito">${esVerdadero(p.Favorito)?'★':'☆'}</button>
+          ${showTrash
+            ? `<button onclick="restaurarPrenda('${p.ID}')" title="Restaurar">↩️</button><button onclick="borrarPermanente('${p.ID}')" title="Eliminar definitivamente">🗑</button>`
+            : `<button onclick="abrirEditarPrenda('${p.ID}')" title="Editar">✏️</button><button onclick="pedirEliminarPrenda('${p.ID}')" title="Eliminar">🗑</button>`}
+        </div>
+      </div>
+    </div>`;
+  }).join('');
+}
+function findPrenda(id){ return DATA.prendas.find(p=>p.ID===id); }
+async function toggleFavorito(id){
+  const p = findPrenda(id); if(!p) return;
+  p.Favorito = !esVerdadero(p.Favorito);
+  renderCatalogo();
+  await apiPost('saveRow', { table:'PRENDAS', row:p });
+  localStorage.setItem('ropa_data_cache', JSON.stringify(DATA));
+}
+function pedirEliminarPrenda(id){
+  const p = findPrenda(id); if(!p) return;
+  confirmarEliminar(`Se moverá "${escAttr(p.Tipo||p.Categoria)}" a la papelera.`, async ()=>{
+    p.Papelera = true;
+    renderCatalogo();
+    await apiPost('saveRow', { table:'PRENDAS', row:p });
+    localStorage.setItem('ropa_data_cache', JSON.stringify(DATA));
+    showToast('Movida a la papelera');
+  });
+}
+async function restaurarPrenda(id){
+  const p = findPrenda(id); if(!p) return;
+  p.Papelera = false;
+  renderCatalogo();
+  await apiPost('saveRow', { table:'PRENDAS', row:p });
+  localStorage.setItem('ropa_data_cache', JSON.stringify(DATA));
+  showToast('Restaurada');
+}
+function borrarPermanente(id){
+  const p = findPrenda(id); if(!p) return;
+  confirmarEliminar(`"${escAttr(p.Tipo||p.Categoria)}" se eliminará para siempre, no se puede deshacer.`, async ()=>{
+    await apiPost('deleteRow', { table:'PRENDAS', id });
+    DATA.prendas = DATA.prendas.filter(x=>x.ID!==id);
+    localStorage.setItem('ropa_data_cache', JSON.stringify(DATA));
+    renderCatalogo();
+    showToast('Eliminada definitivamente');
+  });
+}
+function abrirEditarPrenda(id){
+  const p = findPrenda(id); if(!p) return;
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay';
+  overlay.innerHTML = `<div class="modal">
+    <h3>Editar prenda</h3>
+    <div class="field"><label>Categoría</label><select id="edCat">${CATEGORIAS.map(c=>`<option ${c===p.Categoria?'selected':''}>${c}</option>`).join('')}</select></div>
+    <div class="field"><label>Tipo</label><input id="edTipo" value="${escAttr(p.Tipo||'')}"></div>
+    <div class="field"><label>Color</label><input id="edColor" value="${escAttr(p.Color||'')}"></div>
+    <div class="field"><label>Color secundario</label><input id="edColor2" value="${escAttr(p.ColorSecundario||'')}"></div>
+    <div class="field"><label>Marca</label><input id="edMarca" value="${escAttr(p.Marca||'')}"></div>
+    <div class="field"><label>Formalidad</label><select id="edForm"><option value="">Sin definir</option>${FORMALIDADES.map(f=>`<option ${f===p.Formalidad?'selected':''}>${f}</option>`).join('')}</select></div>
+    <div class="field"><label>Notas</label><textarea id="edNotas" rows="2">${escAttr(p.Notas||'')}</textarea></div>
+    <div class="actions">
+      <button class="btn ghost" id="edCancel">Cancelar</button>
+      <button class="btn" id="edGuardar">Guardar</button>
+    </div>
+  </div>`;
+  document.body.appendChild(overlay);
+  overlay.addEventListener('click', e=>{ if(e.target===overlay) overlay.remove(); });
+  overlay.querySelector('#edCancel').onclick = ()=> overlay.remove();
+  overlay.querySelector('#edGuardar').onclick = async ()=>{
+    p.Categoria = overlay.querySelector('#edCat').value;
+    p.Tipo = overlay.querySelector('#edTipo').value;
+    p.Color = overlay.querySelector('#edColor').value;
+    p.ColorSecundario = overlay.querySelector('#edColor2').value;
+    p.Marca = overlay.querySelector('#edMarca').value;
+    p.Formalidad = overlay.querySelector('#edForm').value;
+    p.Notas = overlay.querySelector('#edNotas').value;
+    overlay.remove();
+    renderCatalogo();
+    await apiPost('saveRow', { table:'PRENDAS', row:p });
+    localStorage.setItem('ropa_data_cache', JSON.stringify(DATA));
+    showToast('Guardado');
+  };
+}
+
+// ============================================================
+//  Qué me puse hoy
+// ============================================================
+let seleccionHoy = new Set();
+function renderHoy(){
+  const wrap = document.getElementById('hoyPickGroups');
+  const activos = DATA.prendas.filter(p=>!esVerdadero(p.Papelera));
+  wrap.innerHTML = CATEGORIAS.map(cat=>{
+    const items = activos.filter(p=>p.Categoria===cat);
+    if(!items.length) return '';
+    return `<div class="pick-group"><h3>${CATEGORIA_ICONO[cat]} ${cat}</h3><div class="pick-list">
+      ${items.map(p=>`<div class="pick-item ${seleccionHoy.has(p.ID)?'selected':''}" onclick="toggleSeleccionHoy('${p.ID}')">
+        ${p.FotoURL?`<img src="${p.FotoURL}">`:`<div style="width:76px;height:76px;border-radius:10px;background:var(--accent-soft);display:flex;align-items:center;justify-content:center;font-size:26px">${CATEGORIA_ICONO[cat]}</div>`}
+        <div>${escAttr(p.Tipo||cat)}</div>
+      </div>`).join('')}
+    </div></div>`;
+  }).join('') || '<p class="hint">Todavía no hay prendas en tu catálogo.</p>';
+  renderUsosRecientes();
+}
+function toggleSeleccionHoy(id){ seleccionHoy.has(id) ? seleccionHoy.delete(id) : seleccionHoy.add(id); renderHoy(); }
+async function guardarUsoHoy(){
+  if(!seleccionHoy.size){ showToast('Selecciona al menos una prenda'); return; }
+  const prendaIds = Array.from(seleccionHoy);
+  const evento = document.getElementById('hoyEvento').value.trim();
+  const fecha = new Date().toISOString();
+  const r = await apiPost('registrarUso', { prendaIds, fecha, evento });
+  if(r.ok){
+    prendaIds.forEach(id=>{
+      const p = findPrenda(id); if(!p) return;
+      p.UltimoUso = fecha; p.VecesUsado = (Number(p.VecesUsado)||0)+1;
+    });
+    DATA.usos.push(r.uso);
+    localStorage.setItem('ropa_data_cache', JSON.stringify(DATA));
+    seleccionHoy.clear();
+    document.getElementById('hoyEvento').value='';
+    renderHoy();
+    showToast('Registrado');
+  } else showToast('No se pudo guardar: '+(r.error||'sin conexión'));
+}
+function renderUsosRecientes(){
+  const wrap = document.getElementById('usosRecientes');
+  const recientes = [...DATA.usos].sort((a,b)=> new Date(b.Fecha)-new Date(a.Fecha)).slice(0,10);
+  if(!recientes.length){ wrap.innerHTML = '<p class="hint">Sin registros todavía.</p>'; return; }
+  wrap.innerHTML = recientes.map(u=>{
+    let ids = []; try{ ids = JSON.parse(u.PrendaIDsJSON||'[]'); }catch(e){}
+    const nombres = ids.map(id=>{ const p=findPrenda(id); return p ? (p.Tipo||p.Categoria) : '?'; }).join(', ');
+    const fecha = new Date(u.Fecha).toLocaleDateString('es-MX', {day:'numeric', month:'short'});
+    return `<div class="detect-card" style="align-items:center">
+      <div class="fields" style="grid-template-columns:1fr"><div><b>${fecha}</b>${u.Evento?' · '+escAttr(u.Evento):''}<br><span class="hint">${escAttr(nombres)}</span></div></div>
+      <button class="remove" onclick="pedirEliminarUso('${u.ID}')">✕</button>
+    </div>`;
+  }).join('');
+}
+function pedirEliminarUso(id){
+  confirmarEliminar('Se eliminará este registro de uso.', async ()=>{
+    await apiPost('deleteRow', { table:'USOS', id });
+    DATA.usos = DATA.usos.filter(u=>u.ID!==id);
+    localStorage.setItem('ropa_data_cache', JSON.stringify(DATA));
+    renderUsosRecientes();
+    showToast('Eliminado');
+  });
+}
+
+// ============================================================
+//  Sugerencias (evento + clima + tono de piel)
+// ============================================================
+const WEATHER_CODES = {0:'despejado',1:'poco nublado',2:'parcialmente nublado',3:'nublado',45:'niebla',48:'niebla',
+  51:'llovizna ligera',53:'llovizna',55:'llovizna fuerte',61:'lluvia ligera',63:'lluvia',65:'lluvia fuerte',
+  71:'nieve ligera',73:'nieve',75:'nieve fuerte',80:'chubascos',81:'chubascos',82:'chubascos fuertes',
+  95:'tormenta',96:'tormenta con granizo',99:'tormenta con granizo'};
+function usarClimaAutomatico(){
+  if(!navigator.geolocation){ showToast('Tu navegador no soporta ubicación'); return; }
+  showToast('Buscando tu ubicación…');
+  navigator.geolocation.getCurrentPosition(async pos=>{
+    const { latitude, longitude } = pos.coords;
+    try{
+      const r = await fetch(`https://api.open-meteo.com/v1/forecast?latitude=${latitude}&longitude=${longitude}&current=temperature_2m,weathercode&timezone=auto`);
+      const d = await r.json();
+      const temp = Math.round(d.current.temperature_2m);
+      const cond = WEATHER_CODES[d.current.weathercode] || '';
+      document.getElementById('sugClima').value = `${temp}°C, ${cond}`;
+      showToast('Clima actualizado');
+    }catch(e){ showToast('No se pudo obtener el clima'); }
+  }, ()=> showToast('No se pudo acceder a tu ubicación'));
+}
+async function pedirSugerencias(){
+  const evento = document.getElementById('sugEvento').value;
+  const clima = document.getElementById('sugClima').value.trim();
+  const perfil = DATA.perfil[0] || {};
+  const wrap = document.getElementById('sugResultados');
+  wrap.innerHTML = '<p class="hint">Pensando outfits…</p>';
+  const r = await apiPost('sugerirOutfit', { evento, clima, tonoPiel: perfil.TonoPiel||'', subtono: perfil.Subtono||'' });
+  if(!r.ok){ wrap.innerHTML = `<p class="hint">No se pudo generar sugerencias: ${r.error||'sin conexión'}</p>`; return; }
+  if(!r.outfits || !r.outfits.length){ wrap.innerHTML = '<p class="hint">La IA no encontró combinaciones — agrega más prendas al catálogo.</p>'; return; }
+  wrap.innerHTML = r.outfits.map((o,i)=>{
+    const prendas = (o.prendaIds||[]).map(id=>findPrenda(id)).filter(Boolean);
+    return `<div class="outfit-card">
+      <div class="outfit-items">${prendas.map(p=> p.FotoURL?`<img src="${p.FotoURL}">`:`<div style="width:64px;height:64px;border-radius:8px;background:var(--accent-soft);display:flex;align-items:center;justify-content:center">${CATEGORIA_ICONO[p.Categoria]}</div>`).join('')}</div>
+      <div class="outfit-motivo">${escAttr(o.motivo||'')}</div>
+      <button class="btn secondary" style="margin-top:10px" onclick='usarOutfitHoy(${JSON.stringify(o.prendaIds||[])})'>Usar hoy</button>
+    </div>`;
+  }).join('');
+}
+async function usarOutfitHoy(prendaIds){
+  const fecha = new Date().toISOString();
+  const evento = document.getElementById('sugEvento').value;
+  const r = await apiPost('registrarUso', { prendaIds, fecha, evento });
+  if(r.ok){
+    prendaIds.forEach(id=>{ const p=findPrenda(id); if(p){ p.UltimoUso=fecha; p.VecesUsado=(Number(p.VecesUsado)||0)+1; } });
+    DATA.usos.push(r.uso);
+    localStorage.setItem('ropa_data_cache', JSON.stringify(DATA));
+    showToast('Registrado como lo que usaste hoy');
+  } else showToast('No se pudo registrar: '+(r.error||'sin conexión'));
+}
+
+// ============================================================
+//  Olvidados
+// ============================================================
+function renderOlvidados(){
+  const umbral = Number(document.getElementById('olvidadosDias').value);
+  const activos = DATA.prendas.filter(p=>!esVerdadero(p.Papelera));
+  const olvidadas = activos.filter(p=>{
+    const dias = diasDesde(p.UltimoUso);
+    return dias===null || dias>=umbral;
+  }).sort((a,b)=>{
+    const da = diasDesde(a.UltimoUso), db = diasDesde(b.UltimoUso);
+    if(da===null && db===null) return 0;
+    if(da===null) return -1; if(db===null) return 1;
+    return db-da;
+  });
+  const grid = document.getElementById('olvidadosGrid');
+  if(!olvidadas.length){ grid.innerHTML = '<p class="hint">Todo tu clóset se ha usado recientemente 🎉</p>'; return; }
+  grid.innerHTML = olvidadas.map(p=>{
+    const dias = diasDesde(p.UltimoUso);
+    const foto = p.FotoURL ? `<img class="thumb" src="${p.FotoURL}" loading="lazy">` : `<div class="thumb ph">${CATEGORIA_ICONO[p.Categoria]||'👕'}</div>`;
+    return `<div class="card">${foto}<div class="body">
+      <div class="tipo">${escAttr(p.Tipo||p.Categoria)}</div>
+      <div class="meta">${dias===null?'Nunca usada':'Hace '+dias+' días'}</div>
+    </div></div>`;
+  }).join('');
+}
+
+// ============================================================
+//  Perfil
+// ============================================================
+const PERFIL_ID = 'perfil-unico';
+function renderPerfilScreen(){
+  const p = DATA.perfil.find(x=>x.ID===PERFIL_ID) || DATA.perfil[0] || {};
+  document.getElementById('perfilTono').value = p.TonoPiel||'';
+  document.getElementById('perfilSubtono').value = p.Subtono||'';
+  document.getElementById('perfilCiudad').value = p.Ciudad||'';
+  document.getElementById('perfilConexionInfo').textContent = `Sheet vinculado · ${DATA.prendas.length} prendas en tu catálogo`;
+}
+async function guardarPerfil(){
+  const row = {
+    ID: PERFIL_ID,
+    TonoPiel: document.getElementById('perfilTono').value,
+    Subtono: document.getElementById('perfilSubtono').value,
+    Ciudad: document.getElementById('perfilCiudad').value,
+    Nombre: ''
+  };
+  const idx = DATA.perfil.findIndex(x=>x.ID===PERFIL_ID);
+  if(idx>=0) DATA.perfil[idx] = row; else DATA.perfil.push(row);
+  localStorage.setItem('ropa_data_cache', JSON.stringify(DATA));
+  await apiPost('saveRow', { table:'PERFIL', row });
+  showToast('Perfil guardado');
+}
+
+// ============================================================
+//  Arranque
+// ============================================================
+if(!needsSetup()) boot();
+</script>
+</body>
+</html>
