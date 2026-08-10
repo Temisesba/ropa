@@ -152,8 +152,12 @@ nav.tabbar button .ic{font-size:19px}
       <p class="hint">Sube fotos donde se vea tu ropa (selfies, outfits, tu clóset). La IA detecta cada prenda por foto y tú confirmas antes de guardar.</p>
       <div class="upload-drop">
         <input type="file" id="fileInput" accept="image/*" multiple style="display:none" onchange="onFilesSelected(this.files)">
-        <button class="btn" onclick="document.getElementById('fileInput').click()">📷 Elegir fotos</button>
-        <p class="hint" style="margin-top:10px">Puedes elegir varias a la vez</p>
+        <input type="file" id="fileInputCam" accept="image/*" capture="environment" style="display:none" onchange="onFilesSelected(this.files)">
+        <div style="display:flex;gap:8px;justify-content:center;flex-wrap:wrap">
+          <button class="btn" onclick="document.getElementById('fileInput').click()">🖼️ Elegir de galería</button>
+          <button class="btn secondary" onclick="document.getElementById('fileInputCam').click()">📷 Tomar foto</button>
+        </div>
+        <p class="hint" style="margin-top:10px">De galería puedes elegir varias a la vez</p>
       </div>
       <div id="uploadProgressWrap" class="hidden">
         <p class="hint" id="uploadProgressText"></p>
@@ -178,7 +182,11 @@ nav.tabbar button .ic{font-size:19px}
       <div class="field"><label class="hint">Evento (opcional)</label><input type="text" id="hoyEvento" placeholder="Trabajo, cita, casual…"></div>
 
       <input type="file" id="fileInputHoy" accept="image/*" style="display:none" onchange="onFotoHoySeleccionada(this.files)">
-      <button class="btn secondary" onclick="document.getElementById('fileInputHoy').click()">📷 Reconocer con una foto</button>
+      <input type="file" id="fileInputHoyCam" accept="image/*" capture="environment" style="display:none" onchange="onFotoHoySeleccionada(this.files)">
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        <button class="btn secondary" onclick="document.getElementById('fileInputHoy').click()">🖼️ Reconocer (galería)</button>
+        <button class="btn secondary" onclick="document.getElementById('fileInputHoyCam').click()">📷 Reconocer (tomar foto)</button>
+      </div>
       <p class="hint">Sube una foto de lo que traes puesto — la IA la compara contra tu catálogo, así no se duplica lo que ya tienes.</p>
       <div id="hoyReviewArea"></div>
 
@@ -220,7 +228,11 @@ nav.tabbar button .ic{font-size:19px}
     <section class="screen" id="screen-perfil">
       <h2>Perfil</h2>
       <input type="file" id="fileInputPerfil" accept="image/*" style="display:none" onchange="onFotoPerfilSeleccionada(this.files)">
-      <button class="btn secondary" onclick="document.getElementById('fileInputPerfil').click()">📷 Detectar con una foto</button>
+      <input type="file" id="fileInputPerfilCam" accept="image/*" capture="user" style="display:none" onchange="onFotoPerfilSeleccionada(this.files)">
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        <button class="btn secondary" onclick="document.getElementById('fileInputPerfil').click()">🖼️ Detectar (galería)</button>
+        <button class="btn secondary" onclick="document.getElementById('fileInputPerfilCam').click()">📷 Detectar (tomar foto)</button>
+      </div>
       <p class="hint">Sube una foto tuya con buena luz (se te vea la piel) y la IA sugiere tu tono y subtono abajo — tú decides si lo dejas así o lo cambias.</p>
       <p class="hint" id="perfilDetectInfo"></p>
       <div class="field"><label class="hint">Tono de piel</label>
