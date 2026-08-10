@@ -693,6 +693,34 @@ async function analizarFotoParaHoy(recortada){
 function candidatosParaPrenda(categoria){
   return DATA.prendas.filter(p=>!esVerdadero(p.Papelera) && p.Categoria===categoria);
 }
+// Quita acentos comparando por código de carácter (evita escribir marcas
+// Unicode combinadas literales en el código fuente, frágil de editar).
+function normalizarTexto(s){
+  const normalizado = String(s||'').toLowerCase().normalize('NFD');
+  let limpio = '';
+  for(let i=0; i<normalizado.length; i++){
+    const codigo = normalizado.charCodeAt(i);
+    if(codigo < 0x0300 || codigo > 0x036f) limpio += normalizado[i];
+  }
+  return limpio.trim();
+}
+// Puntaje simple de "qué tan parecida" es una prenda ya guardada a lo que
+// se detectó — color pesa más que tipo. Se exige AL MENOS coincidencia de
+// color para sugerir algo (tipo solo no basta, hay demasiadas "camisetas"
+// distintas) — evita sugerir cualquier cosa de la misma categoría nomás
+// porque sí, que era el problema reportado ("no avisa bien").
+function mejorCandidato(it, candidatos){
+  let mejor = null, mejorPuntaje = 0;
+  candidatos.forEach(p=>{
+    const colorIt = normalizarTexto(it.color), colorP = normalizarTexto(p.Color);
+    const tipoIt = normalizarTexto(it.tipo), tipoP = normalizarTexto(p.Tipo);
+    let puntaje = 0;
+    if(colorIt && colorP && (colorP.includes(colorIt) || colorIt.includes(colorP))) puntaje += 2;
+    if(tipoIt && tipoP && (tipoP.includes(tipoIt) || tipoIt.includes(tipoP))) puntaje += 1;
+    if(puntaje > mejorPuntaje){ mejorPuntaje = puntaje; mejor = p; }
+  });
+  return mejorPuntaje >= 2 ? mejor : null;
+}
 function renderRevisionHoy(){
   const d = hoyDetections;
   const area = document.getElementById('hoyReviewArea');
@@ -706,7 +734,7 @@ function renderRevisionHoy(){
   d.items.forEach((it, i)=>{
     const candidatos = candidatosParaPrenda(it.categoria);
     if(it.matchId===undefined){
-      const sugerido = candidatos.find(p=> p.Color && it.color && (p.Color.toLowerCase().includes(it.color.toLowerCase()) || it.color.toLowerCase().includes(p.Color.toLowerCase())));
+      const sugerido = mejorCandidato(it, candidatos);
       it.matchId = sugerido ? sugerido.ID : null;
     }
     const pickHtml = candidatos.map(p=>`<div class="pick-item ${it.matchId===p.ID?'selected':''}" onclick="seleccionarCandidatoHoy(${i},'${p.ID}')">
@@ -716,6 +744,10 @@ function renderRevisionHoy(){
       `<div class="pick-item ${it.matchId===null?'selected':''}" onclick="seleccionarCandidatoHoy(${i},null)">
         <div class="ph nueva">✚</div><div>Nueva</div>
       </div>`;
+    const prendaSugerida = it.matchId ? DATA.prendas.find(p=>p.ID===it.matchId) : null;
+    const avisoDuplicado = prendaSugerida
+      ? `<p class="hint" style="margin:8px 0 4px">🔁 <b>Creemos que ya tienes esta prenda</b> (${escAttr(prendaSugerida.Tipo||prendaSugerida.Categoria)}, ${escAttr(prendaSugerida.Color||'')}) — confirma o elige otra abajo:</p>`
+      : `<p class="hint" style="margin:8px 0 4px">✨ No encontramos ninguna parecida en tu catálogo — se guardará como <b>prenda nueva</b>. ¿Es alguna de estas?</p>`;
     cardsHtml += `<div class="detect-card" id="detecthoy-${i}" style="flex-direction:column;align-items:stretch">
       <div style="display:flex;gap:10px">
         <img src="${it.cropPreview||d.dataUrl}" alt="">
@@ -727,7 +759,7 @@ function renderRevisionHoy(){
         </div>
         <button class="remove" onclick="quitarDeteccionHoy(${i})" title="No incluir esta prenda">✕</button>
       </div>
-      <p class="hint" style="margin:8px 0 4px">¿Ya la tienes en tu catálogo?</p>
+      ${avisoDuplicado}
       <div class="pick-list">${pickHtml}</div>
     </div>`;
   });
@@ -744,12 +776,11 @@ async function guardarRecortesHoy(){
   if(!d.items.length){ cancelarRecortarHoy(); return; }
   const btn = document.getElementById('btnGuardarHoy');
   if(btn){ btn.disabled = true; btn.textContent = 'Guardando…'; }
-  const hayPrendasNuevas = d.items.some(it=>!it.matchId);
-  let origenUrl = '';
-  if(hayPrendasNuevas){
-    const origen = await apiPost('uploadImage', { imageBase64: d.base64, mimeType: d.mimeType, fileName: 'foto-hoy-'+Date.now()+'.jpg' });
-    origenUrl = origen.ok ? origen.url : '';
-  }
+  // Se sube siempre (no solo si hay prendas nuevas) — así el registro de
+  // uso de HOY queda con la foto real de hoy, aunque todas las prendas ya
+  // existieran, para poder ver después "las fotos de cuando la usé".
+  const origen = await apiPost('uploadImage', { imageBase64: d.base64, mimeType: d.mimeType, fileName: 'foto-hoy-'+Date.now()+'.jpg' });
+  const origenUrl = origen.ok ? origen.url : '';
   const prendaIds = [];
   for(const it of d.items){
     if(it.matchId){ prendaIds.push(it.matchId); continue; }
@@ -761,7 +792,7 @@ async function guardarRecortesHoy(){
   }
   const evento = document.getElementById('hoyEvento').value.trim();
   const fecha = new Date().toISOString();
-  const r = await apiPost('registrarUso', { prendaIds, fecha, evento });
+  const r = await apiPost('registrarUso', { prendaIds, fecha, evento, fotoUrl: origenUrl });
   if(r.ok){
     prendaIds.forEach(id=>{ const p=findPrenda(id); if(p){ p.UltimoUso=fecha; p.VecesUsado=(Number(p.VecesUsado)||0)+1; } });
     DATA.usos.push(r.uso);
@@ -857,6 +888,22 @@ function borrarPermanente(id){
     showToast('Eliminada definitivamente');
   });
 }
+// Muestra cada registro de uso de esta prenda, más reciente primero —
+// con foto real de ese día cuando el registro vino del flujo "reconocer
+// con foto" en Hoy (los registros hechos a mano, sin foto, solo muestran
+// la fecha).
+function historialUsoHtml(p){
+  const usos = DATA.usos.filter(u=>{
+    let ids = []; try{ ids = JSON.parse(u.PrendaIDsJSON||'[]'); }catch(e){}
+    return ids.includes(p.ID);
+  }).sort((a,b)=> new Date(b.Fecha)-new Date(a.Fecha));
+  if(!usos.length) return '<p class="hint">Todavía no hay registros de uso para esta prenda.</p>';
+  return `<div class="pick-list">${usos.map(u=>{
+    const fecha = new Date(u.Fecha).toLocaleDateString('es-MX', {day:'numeric', month:'short'});
+    const foto = u.FotoURL ? `<img src="${u.FotoURL}" onclick="verFotoGrande('${u.FotoURL}')" style="cursor:zoom-in">` : `<div class="ph">📅</div>`;
+    return `<div class="pick-item">${foto}<div>${fecha}</div></div>`;
+  }).join('')}</div>`;
+}
 function abrirEditarPrenda(id){
   const p = findPrenda(id); if(!p) return;
   const overlay = document.createElement('div');
@@ -877,6 +924,7 @@ function abrirEditarPrenda(id){
     <div class="field"><label>Marca</label><input id="edMarca" value="${escAttr(p.Marca||'')}"></div>
     <div class="field"><label>Formalidad</label><select id="edForm"><option value="">Sin definir</option>${FORMALIDADES.map(f=>`<option ${f===p.Formalidad?'selected':''}>${f}</option>`).join('')}</select></div>
     <div class="field"><label>Notas</label><textarea id="edNotas" rows="2">${escAttr(p.Notas||'')}</textarea></div>
+    <div class="field"><label>Historial de uso ${Number(p.VecesUsado)?`(${Number(p.VecesUsado)} veces)`:''}</label>${historialUsoHtml(p)}</div>
     <div class="actions">
       <button class="btn ghost" id="edCancel">Cancelar</button>
       <button class="btn" id="edGuardar">Guardar</button>
