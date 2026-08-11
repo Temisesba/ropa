@@ -531,8 +531,8 @@ function mostrarRecorteManual(resized, { containerId, onListo, onDescartar }){
     </div>
     <div style="display:flex;gap:8px;margin-top:14px;flex-wrap:wrap">
       <button class="btn secondary" onclick="cropState.onDescartar()">Descartar foto</button>
-      <button class="btn ghost" onclick="usarFotoCompleta()">Usar foto completa</button>
       <button class="btn" onclick="confirmarRecorte()">Recortar y analizar</button>
+      <button class="btn ghost" onclick="usarFotoCompleta()">Usar foto completa</button>
     </div>`;
   posicionarCropBox();
   document.getElementById('cropBox').addEventListener('pointerdown', onCropPointerDown);
@@ -982,7 +982,12 @@ async function guardarDetecciones(){
   for(let i=0;i<d.items.length;i++){
     const it = d.items[i];
     if(it.matchId){ todosLosIds.push(it.matchId); continue; }
-    if(mejorCandidato(it, candidatosPapeleraParaPrenda(it.categoria))){ omitidasPorPapelera++; continue; }
+    // minPuntaje 3 a propósito (color Y tipo, no solo color) — omitir en
+    // silencio es más delicado que solo sugerir un match para revisar a
+    // mano, y con el umbral de 2 (solo color) cualquier prenda nueva del
+    // mismo color que ALGO en la papelera (ej. "negro") se descartaba
+    // sola sin avisar bien — bug real reportado por el usuario.
+    if(mejorCandidato(it, candidatosPapeleraParaPrenda(it.categoria), 3)){ omitidasPorPapelera++; continue; }
     if(btn) btn.textContent = `Generando prenda ${i+1}/${d.items.length}…`;
     const row = await crearFilaPrenda(it, origenUrl);
     await apiPost('saveRow', { table:'PRENDAS', row });
@@ -1063,7 +1068,8 @@ function normalizarTexto(s){
 // color para sugerir algo (tipo solo no basta, hay demasiadas "camisetas"
 // distintas) — evita sugerir cualquier cosa de la misma categoría nomás
 // porque sí, que era el problema reportado ("no avisa bien").
-function mejorCandidato(it, candidatos){
+function mejorCandidato(it, candidatos, minPuntaje){
+  if(minPuntaje===undefined) minPuntaje = 2;
   let mejor = null, mejorPuntaje = 0;
   candidatos.forEach(p=>{
     const colorIt = normalizarTexto(it.color), colorP = normalizarTexto(p.Color);
@@ -1073,7 +1079,7 @@ function mejorCandidato(it, candidatos){
     if(tipoIt && tipoP && (tipoP.includes(tipoIt) || tipoIt.includes(tipoP))) puntaje += 1;
     if(puntaje > mejorPuntaje){ mejorPuntaje = puntaje; mejor = p; }
   });
-  return mejorPuntaje >= 2 ? mejor : null;
+  return mejorPuntaje >= minPuntaje ? mejor : null;
 }
 function renderRevisionHoy(){
   const d = hoyDetections;
@@ -1175,7 +1181,7 @@ async function guardarRecortesHoy(){
   const prendaIds = [];
   for(const it of d.items){
     if(it.matchId){ prendaIds.push(it.matchId); continue; }
-    if(mejorCandidato(it, candidatosPapeleraParaPrenda(it.categoria))) continue;
+    if(mejorCandidato(it, candidatosPapeleraParaPrenda(it.categoria), 3)) continue;
     if(btn) btn.textContent = 'Generando prenda nueva…';
     const row = await crearFilaPrenda(it, origenUrl);
     await apiPost('saveRow', { table:'PRENDAS', row });
