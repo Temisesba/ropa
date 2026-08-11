@@ -115,6 +115,7 @@ nav.tabbar button .ic{font-size:19px}
    posiciones por categoría adivinadas ni generar nada nuevo al
    agregar/quitar/reordenar una prenda. */
 .maniqui-doll-wrap{position:relative;max-width:280px;aspect-ratio:9/16;margin:10px auto 0;background:var(--bg-card);border-radius:var(--radius);box-shadow:var(--shadow);overflow:hidden}
+.checker-bg{background-image:linear-gradient(45deg,#ccc 25%,transparent 25%),linear-gradient(-45deg,#ccc 25%,transparent 25%),linear-gradient(45deg,transparent 75%,#ccc 75%),linear-gradient(-45deg,transparent 75%,#ccc 75%);background-size:16px 16px;background-position:0 0,0 8px,8px -8px,-8px 0}
 .maniqui-doll-base{position:absolute;inset:0;width:100%;height:100%;object-fit:contain;z-index:0}
 .maniqui-doll-capa-full{position:absolute;inset:0;width:100%;height:100%;object-fit:contain;cursor:zoom-in}
 .maniqui-arrow{position:absolute;transform:translateY(-50%);width:30px;height:30px;border-radius:50%;background:var(--bg-card);border:1px solid var(--border);font-size:16px;z-index:6;box-shadow:var(--shadow);opacity:.92}
@@ -321,7 +322,7 @@ let SHEET_URL = '';
 // Nombre-landmark de esta versión — cámbialo en cada cambio que se
 // despliegue, así se puede saber a simple vista (en Perfil) si el
 // celular ya está viendo lo último o una copia vieja en caché.
-const BUILD_VERSION = 'Kanasin';
+const BUILD_VERSION = 'Leon';
 let DATA = { prendas: [], usos: [], outfits_sugeridos: [], perfil: [], fotos_origen: [] };
 let showTrash = false;
 let soloFavoritos = false;
@@ -1769,6 +1770,7 @@ function botonesFotoHtml(p){
     `<button class="btn ghost" id="edRegenerar" style="font-size:12px;padding:6px 10px">🔄 Regenerar</button>` +
     (p.FotoGeneradaURL ? `<button class="btn ghost" id="edAjustarManiqui" style="font-size:12px;padding:6px 10px">✋ Ajustar en maniquí</button>` : '') +
     (p.FotoGeneradaURL && claveMoldeParaPrenda(p.Categoria, p.Tipo) ? `<button class="btn ghost" id="edAplicarMolde" style="font-size:12px;padding:6px 10px" title="Reacomoda esta capa en el molde de '${escAttr(nombreMoldeParaPrenda(p.Categoria,p.Tipo))}' — no usa IA, solo la escala y la mueve">📐 Aplicar molde</button>` : '') +
+    (p.FotoGeneradaURL ? `<button class="btn ghost" id="edBorrador" style="font-size:12px;padding:6px 10px" title="Pinta transparencia a mano sobre la foto generada, sin usar IA">🧽 Borrador</button>` : '') +
     `<button class="btn ghost" id="edRecortar" style="font-size:12px;padding:6px 10px">✂️ Recortar</button>` +
     `<button class="btn ghost" id="edSubirTienda" style="font-size:12px;padding:6px 10px">📤 Subir foto de tienda</button>`;
 }
@@ -1803,6 +1805,8 @@ function cablearBotonesFoto(p){
     renderCatalogo(); refrescarFotoModal(p);
     showToast('Puesta en el molde de "'+moldeBase(clave).nombre+'"');
   };
+  const btnBorrador = document.getElementById('edBorrador');
+  if(btnBorrador) btnBorrador.onclick = ()=> abrirBorrador(p);
   const btnRecortar = document.getElementById('edRecortar');
   if(btnRecortar) btnRecortar.onclick = async ()=>{
     const fileId = fileIdDeUrlDrive(p.FotoRealURL) || fileIdDeUrlDrive(p.FotoOrigenURL) || fileIdDeUrlDrive(p.FotoURL);
@@ -1915,6 +1919,130 @@ async function abrirMarcarZona(p){
     overlay.remove();
     actualizarEstadoMarca(p);
     showToast('Zona marcada — dale "🔄 Regenerar" para aplicarla');
+  };
+}
+// Borrador manual: pinta transparencia directo sobre la capa ya generada,
+// sin usar IA — el usuario decide exactamente qué desaparece. Dos modos:
+// trazo libre (como Paint) y óvalo (arrastra una esquina a la otra) para
+// curvas limpias como el hueco del cuello, que a mano alzada salen
+// irregulares. Nada se sube a Drive hasta "💾 Guardar".
+async function abrirBorrador(p){
+  if(!p.FotoGeneradaURL){ showToast('Esta prenda todavía no tiene una foto generada'); return; }
+  const fileId = fileIdDeUrlDrive(p.FotoGeneradaURL);
+  if(!fileId){ showToast('No se pudo identificar la foto generada'); return; }
+  showToast('Cargando foto…');
+  const r = await apiPost('descargarImagenDrive', { fileId });
+  if(!r.ok){ showToast('No se pudo cargar la foto: '+(r.error||'sin conexión')); return; }
+  const img = new Image();
+  const cargada = new Promise((resolve,reject)=>{ img.onload=resolve; img.onerror=reject; });
+  img.src = 'data:'+r.mimeType+';base64,'+r.base64;
+  await cargada;
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay';
+  overlay.innerHTML = `<div class="modal">
+    <h3>Borrador</h3>
+    <p class="hint">Pinta encima para borrar esa parte (queda transparente) — sin IA, tú decides exactamente qué desaparece.</p>
+    <div class="chips" style="justify-content:center">
+      <button class="chip active" id="modoLibre">✏️ Trazo libre</button>
+      <button class="chip" id="modoOvalo">⭕ Óvalo (curvas limpias)</button>
+    </div>
+    <div class="checker-bg" style="max-width:280px;margin:10px auto 0;border-radius:10px;overflow:hidden">
+      <canvas id="borradorCanvas" style="width:100%;touch-action:none;display:block"></canvas>
+    </div>
+    <p class="hint" style="text-align:center;margin-top:8px" id="borradorGrosorTxt">Grosor del borrador</p>
+    <input type="range" id="borradorGrosor" min="4" max="60" value="20" style="width:100%">
+    <div class="chips" style="justify-content:center;margin-top:6px">
+      <button class="chip" id="borradorReiniciar">↺ Reiniciar</button>
+    </div>
+    <div class="actions">
+      <button class="btn ghost" id="borradorCancelar">Cancelar</button>
+      <button class="btn" id="borradorGuardar">💾 Guardar</button>
+    </div>
+  </div>`;
+  document.body.appendChild(overlay);
+  const canvas = document.getElementById('borradorCanvas');
+  canvas.width = img.naturalWidth; canvas.height = img.naturalHeight;
+  const ctx = canvas.getContext('2d');
+  ctx.drawImage(img, 0, 0);
+  // buffer = el estado YA confirmado (sin la vista previa del óvalo encima)
+  const buffer = document.createElement('canvas');
+  buffer.width = canvas.width; buffer.height = canvas.height;
+  const bctx = buffer.getContext('2d');
+  bctx.drawImage(img, 0, 0);
+  let modoOvalo = false, grosor = 20, activo = false, inicio = null, ultimo = null;
+  document.getElementById('borradorGrosor').oninput = e=> grosor = Number(e.target.value);
+  const btnLibre = document.getElementById('modoLibre'), btnOvalo = document.getElementById('modoOvalo');
+  btnLibre.onclick = ()=>{ modoOvalo=false; btnLibre.classList.add('active'); btnOvalo.classList.remove('active'); };
+  btnOvalo.onclick = ()=>{ modoOvalo=true; btnOvalo.classList.add('active'); btnLibre.classList.remove('active'); };
+  const escala = ()=> canvas.width / canvas.getBoundingClientRect().width;
+  const posEnCanvas = e=>{
+    const rect = canvas.getBoundingClientRect();
+    return { x:(e.clientX-rect.left)/rect.width*canvas.width, y:(e.clientY-rect.top)/rect.height*canvas.height };
+  };
+  const borrarCirculo = (c, pos, radio)=>{
+    c.save(); c.globalCompositeOperation = 'destination-out';
+    c.beginPath(); c.arc(pos.x, pos.y, radio, 0, Math.PI*2); c.fill(); c.restore();
+  };
+  const borrarLinea = (c, a, b, radio)=>{
+    const dist = Math.hypot(b.x-a.x, b.y-a.y);
+    const pasos = Math.max(1, Math.ceil(dist / Math.max(2, radio*0.5)));
+    for(let i=0;i<=pasos;i++){ const t=i/pasos; borrarCirculo(c, { x:a.x+(b.x-a.x)*t, y:a.y+(b.y-a.y)*t }, radio); }
+  };
+  canvas.addEventListener('pointerdown', e=>{
+    activo = true; canvas.setPointerCapture(e.pointerId);
+    inicio = posEnCanvas(e); ultimo = inicio;
+    if(!modoOvalo) borrarCirculo(bctx, inicio, grosor*escala());
+    ctx.clearRect(0,0,canvas.width,canvas.height); ctx.drawImage(buffer,0,0);
+  });
+  canvas.addEventListener('pointermove', e=>{
+    if(!activo) return;
+    const pos = posEnCanvas(e);
+    if(modoOvalo){
+      ctx.clearRect(0,0,canvas.width,canvas.height); ctx.drawImage(buffer,0,0);
+      ctx.save(); ctx.setLineDash([8,6]); ctx.strokeStyle='#ff0000'; ctx.lineWidth=3;
+      ctx.beginPath(); ctx.ellipse((inicio.x+pos.x)/2, (inicio.y+pos.y)/2, Math.abs(pos.x-inicio.x)/2, Math.abs(pos.y-inicio.y)/2, 0, 0, Math.PI*2);
+      ctx.stroke(); ctx.restore();
+    } else {
+      borrarLinea(bctx, ultimo, pos, grosor*escala());
+      ctx.clearRect(0,0,canvas.width,canvas.height); ctx.drawImage(buffer,0,0);
+    }
+    ultimo = pos;
+  });
+  canvas.addEventListener('pointerup', e=>{
+    if(!activo) return;
+    activo = false;
+    if(modoOvalo){
+      const pos = posEnCanvas(e);
+      bctx.save(); bctx.globalCompositeOperation = 'destination-out';
+      bctx.beginPath(); bctx.ellipse((inicio.x+pos.x)/2, (inicio.y+pos.y)/2, Math.abs(pos.x-inicio.x)/2, Math.abs(pos.y-inicio.y)/2, 0, 0, Math.PI*2);
+      bctx.fill(); bctx.restore();
+    }
+    ctx.clearRect(0,0,canvas.width,canvas.height); ctx.drawImage(buffer,0,0);
+  });
+  document.getElementById('borradorReiniciar').onclick = ()=>{
+    bctx.clearRect(0,0,canvas.width,canvas.height); bctx.drawImage(img,0,0);
+    ctx.clearRect(0,0,canvas.width,canvas.height); ctx.drawImage(buffer,0,0);
+  };
+  document.getElementById('borradorCancelar').onclick = ()=> overlay.remove();
+  document.getElementById('borradorGuardar').onclick = async ()=>{
+    const btn = document.getElementById('borradorGuardar');
+    btn.disabled = true; btn.textContent = 'Guardando…';
+    const dataUrl = buffer.toDataURL('image/png');
+    const bboxPct = escanearBboxAlfa(bctx, buffer.width, buffer.height);
+    const subida = await apiPost('uploadImage', { imageBase64: dataUrl.split(',')[1], mimeType:'image/png', fileName:'capa-borrada-'+Date.now()+'.png' });
+    if(!subida.ok){ showToast('No se pudo guardar: '+(subida.error||'sin conexión')); btn.disabled=false; btn.textContent='💾 Guardar'; return; }
+    p.FotoGeneradaURL = subida.url;
+    p.FotoURL = subida.url;
+    p.BBoxJSON = JSON.stringify(bboxPct);
+    await apiPost('saveRow', { table:'PRENDAS', row:p });
+    localStorage.setItem('ropa_data_cache', JSON.stringify(DATA));
+    renderCatalogo();
+    const vestidorCont = document.getElementById('vestidorPreview');
+    if(vestidorCont){ const base = vestidorCont.querySelector('.maniqui-doll-base'); vestidorCont.innerHTML = (base?base.outerHTML:'') + capasHtml(); }
+    renderCapasLista();
+    overlay.remove();
+    refrescarFotoModal(p);
+    showToast('Guardado');
   };
 }
 // Muestra el resultado de la IA como PROPUESTA, sin guardarlo todavía —
