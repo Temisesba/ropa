@@ -321,7 +321,7 @@ let SHEET_URL = '';
 // Nombre-landmark de esta versión — cámbialo en cada cambio que se
 // despliegue, así se puede saber a simple vista (en Perfil) si el
 // celular ya está viendo lo último o una copia vieja en caché.
-const BUILD_VERSION = 'Jalapa';
+const BUILD_VERSION = 'Kanasin';
 let DATA = { prendas: [], usos: [], outfits_sugeridos: [], perfil: [], fotos_origen: [] };
 let showTrash = false;
 let soloFavoritos = false;
@@ -1706,7 +1706,7 @@ function abrirEditarPrenda(id){
       <div id="edFotoPreview">${fotoRecortadaHtml(p,{estilo:'width:100%;max-width:220px;margin:0 auto;border-radius:12px'})}</div>
       <div id="edFotoBotones" style="display:flex;gap:6px;flex-wrap:wrap;justify-content:center;margin-top:8px">${botonesFotoHtml(p)}</div>
       <input type="text" id="edFeedback" placeholder="¿Algo que corregir? ej: sin cinto, mangas largas" style="margin-top:8px">
-      <button class="btn ghost" id="edMarcarZona" style="font-size:12px;padding:6px 10px;margin-top:6px">✏️ Marcar zona a quitar</button>
+      <button class="btn ghost" id="edMarcarZona" style="font-size:12px;padding:6px 10px;margin-top:6px">✏️ Marcar zona a corregir</button>
       <p class="hint" id="edMarcaEstado"></p>
       <div id="edPreviewCandidata"></div>
       <input type="file" id="edFileTienda" accept="image/*" style="display:none">
@@ -1827,47 +1827,45 @@ function refrescarFotoModal(p){
   if(cont){ cont.innerHTML = botonesFotoHtml(p); cablearBotonesFoto(p); }
 }
 async function regenerarFotoPrenda(p){
+  const fileId = fileIdDeUrlDrive(p.FotoRealURL) || fileIdDeUrlDrive(p.FotoOrigenURL) || fileIdDeUrlDrive(p.FotoURL);
+  if(!fileId){ showToast('No hay una foto real de esta prenda para generar desde ahí'); return; }
   const btn = document.getElementById('edRegenerar');
   if(btn){ btn.disabled = true; btn.textContent = 'Generando…'; }
+  const r = await apiPost('descargarImagenDrive', { fileId });
+  if(!r.ok){ showToast('No se pudo cargar la foto: '+(r.error||'sin conexión')); if(btn){ btn.disabled=false; btn.textContent='🔄 Regenerar'; } return; }
   const feedbackEl = document.getElementById('edFeedback');
   const feedback = feedbackEl ? feedbackEl.value.trim() : '';
-  // Si el usuario marcó una zona a quitar, esa foto (con el trazo rojo ya
-  // dibujado encima) se manda en vez de re-descargar una copia limpia —
-  // es justo la referencia visual que necesita la IA para saber qué quitar.
+  const dataUrl = 'data:'+r.mimeType+';base64,'+r.base64;
+  // La marca (si hay) va SIEMPRE como referencia adicional, además de la
+  // foto real de siempre — es la última generada con una zona señalada,
+  // no reemplaza el diseño/color real, solo apunta qué corregir y dónde.
   const usaMarca = marcaPendiente && marcaPendiente.prendaId===p.ID;
-  let dataUrl;
-  if(usaMarca){
-    dataUrl = marcaPendiente.dataUrl;
-  } else {
-    const fileId = fileIdDeUrlDrive(p.FotoRealURL) || fileIdDeUrlDrive(p.FotoOrigenURL) || fileIdDeUrlDrive(p.FotoURL);
-    if(!fileId){ showToast('No hay una foto real de esta prenda para generar desde ahí'); if(btn){ btn.disabled=false; btn.textContent='🔄 Regenerar'; } return; }
-    const r = await apiPost('descargarImagenDrive', { fileId });
-    if(!r.ok){ showToast('No se pudo cargar la foto: '+(r.error||'sin conexión')); if(btn){ btn.disabled=false; btn.textContent='🔄 Regenerar'; } return; }
-    dataUrl = 'data:'+r.mimeType+';base64,'+r.base64;
-  }
-  const candidata = await generarCapaCandidata(p, dataUrl, feedback, btn, '🔄 Regenerar', usaMarca);
+  const marca = usaMarca ? marcaPendiente : null;
+  const candidata = await generarCapaCandidata(p, dataUrl, feedback, btn, '🔄 Regenerar', marca);
   if(btn){ btn.disabled=false; btn.textContent='🔄 Regenerar'; }
   if(!candidata) return;
   if(feedbackEl) feedbackEl.value = '';
   if(usaMarca){ marcaPendiente = null; actualizarEstadoMarca(p); }
   mostrarPreviewCandidata(p, candidata);
 }
-// Estado de "marca a quitar" pendiente — una por prenda, se usa una sola
+// Estado de "marca a corregir" pendiente — una por prenda, se usa una sola
 // vez (al regenerar) y se limpia sola después.
 let marcaPendiente = null;
 function actualizarEstadoMarca(p){
   const el = document.getElementById('edMarcaEstado');
   if(!el) return;
   const activa = marcaPendiente && marcaPendiente.prendaId===p.ID;
-  el.innerHTML = activa ? '✏️ Zona marcada — se usará la próxima vez que le des "🔄 Regenerar". <a href="javascript:void(0)" onclick="marcaPendiente=null;actualizarEstadoMarca(findPrenda(\''+p.ID+'\'))">quitar marca</a>' : '';
+  el.innerHTML = activa ? '✏️ Zona marcada: "'+escAttr(marcaPendiente.instruccion||'')+'" — se usará la próxima vez que le des "🔄 Regenerar". <a href="javascript:void(0)" onclick="marcaPendiente=null;actualizarEstadoMarca(findPrenda(\''+p.ID+'\'))">quitar marca</a>' : '';
 }
-// Deja dibujar (dedo o mouse) directo sobre la foto real de la prenda para
-// señalar qué quitar (ej. un logo, una mancha) — más directo que describirlo
-// en texto. El trazo se pinta en rojo y se manda tal cual como referencia
-// junto con la instrucción de que lo marcado en rojo debe desaparecer.
+// Deja dibujar (dedo o mouse) directo sobre la ÚLTIMA foto generada para
+// señalar qué corregir ahí (quitar, mejorar, agregar algo, etc.) — más
+// directo que describirlo todo por texto. Esa imagen marcada se manda
+// como referencia adicional junto con la instrucción de qué hacer en esa
+// zona, sin tocar el resto de la prenda ya generada.
 async function abrirMarcarZona(p){
-  const fileId = fileIdDeUrlDrive(p.FotoRealURL) || fileIdDeUrlDrive(p.FotoOrigenURL) || fileIdDeUrlDrive(p.FotoURL);
-  if(!fileId){ showToast('No hay una foto real de esta prenda para marcar'); return; }
+  if(!p.FotoGeneradaURL){ showToast('Esta prenda todavía no tiene una foto generada para marcar'); return; }
+  const fileId = fileIdDeUrlDrive(p.FotoGeneradaURL);
+  if(!fileId){ showToast('No se pudo identificar la foto generada'); return; }
   showToast('Cargando foto…');
   const r = await apiPost('descargarImagenDrive', { fileId });
   if(!r.ok){ showToast('No se pudo cargar la foto: '+(r.error||'sin conexión')); return; }
@@ -1875,14 +1873,15 @@ async function abrirMarcarZona(p){
   const overlay = document.createElement('div');
   overlay.className = 'modal-overlay';
   overlay.innerHTML = `<div class="modal">
-    <h3>Marcar zona a quitar</h3>
-    <p class="hint">Dibuja encima de lo que quieres que la IA quite (ej. un logo, una mancha).</p>
-    <div style="position:relative;max-width:280px;margin:0 auto">
-      <canvas id="marcaCanvas" style="width:100%;touch-action:none;border-radius:10px;display:block"></canvas>
+    <h3>Marcar zona a corregir</h3>
+    <p class="hint">Dibuja sobre la zona de la foto generada que quieres corregir, y dinos qué hacer ahí.</p>
+    <div style="position:relative;max-width:280px;margin:0 auto;background:var(--accent-soft);border-radius:10px">
+      <canvas id="marcaCanvas" style="width:100%;touch-action:none;display:block"></canvas>
     </div>
     <div class="chips" style="justify-content:center;margin-top:10px">
       <button class="chip" id="marcaBorrar">🧹 Borrar trazo</button>
     </div>
+    <input type="text" id="marcaInstruccion" placeholder="¿Qué hacer ahí? ej: quítalo, mejóralo, ponle un botón" style="margin-top:10px">
     <div class="actions">
       <button class="btn ghost" id="marcaCancelar">Cancelar</button>
       <button class="btn" id="marcaListo">✅ Listo</button>
@@ -1910,7 +1909,9 @@ async function abrirMarcarZona(p){
   document.getElementById('marcaBorrar').onclick = ()=>{ ctx.clearRect(0,0,canvas.width,canvas.height); ctx.drawImage(resized.canvas,0,0); };
   document.getElementById('marcaCancelar').onclick = ()=> overlay.remove();
   document.getElementById('marcaListo').onclick = ()=>{
-    marcaPendiente = { prendaId: p.ID, dataUrl: canvas.toDataURL('image/jpeg', 0.92) };
+    const instruccion = document.getElementById('marcaInstruccion').value.trim();
+    const dataUrl = canvas.toDataURL('image/jpeg', 0.92);
+    marcaPendiente = { prendaId: p.ID, base64: dataUrl.split(',')[1], mimeType:'image/jpeg', instruccion };
     overlay.remove();
     actualizarEstadoMarca(p);
     showToast('Zona marcada — dale "🔄 Regenerar" para aplicarla');
@@ -1958,7 +1959,7 @@ async function aplicarCapaCandidata(p, candidata){
 // + quitarFondoColor) sobre una imagen que ya se tiene en memoria como dataURL.
 // Sube el resultado a Drive (para poder mostrarlo como preview) pero NO lo
 // guarda todavía en la prenda — eso lo hace aplicarCapaCandidata, aparte.
-async function generarCapaCandidata(p, dataUrl, feedback, btn, textoBtnNormal, tieneMarcas){
+async function generarCapaCandidata(p, dataUrl, feedback, btn, textoBtnNormal, marca){
   const clave = await elegirColorClave(dataUrl);
   const genero = localStorage.getItem('ropa_maniqui_genero')||'mujer';
   const maniqui = await obtenerManiquiBase(genero);
@@ -1967,7 +1968,8 @@ async function generarCapaCandidata(p, dataUrl, feedback, btn, textoBtnNormal, t
     imageBase64: dataUrl.split(',')[1], mimeType:'image/jpeg',
     categoria: p.Categoria, tipo: p.Tipo, color: p.Color, colorSecundario: p.ColorSecundario, estampado: p.Estampado,
     maniquiBase64: maniqui.base64, maniquiMimeType: maniqui.mimeType,
-    claveColorHex: clave.hex, claveColorNombre: clave.nombre, feedback, tieneMarcas
+    claveColorHex: clave.hex, claveColorNombre: clave.nombre, feedback,
+    marcaBase64: marca?marca.base64:undefined, marcaMimeType: marca?marca.mimeType:undefined, marcaInstruccion: marca?marca.instruccion:undefined
   });
   if(!gen.ok){ showToast('No se pudo generar: '+(gen.error||'')); return null; }
   const recorte = await quitarFondoColor('data:'+(gen.mimeType||'image/jpeg')+';base64,'+gen.imageBase64, clave.hex);
