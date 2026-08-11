@@ -338,7 +338,7 @@ let SHEET_URL = '';
 // Nombre-landmark de esta versión — cámbialo en cada cambio que se
 // despliegue, así se puede saber a simple vista (en Perfil) si el
 // celular ya está viendo lo último o una copia vieja en caché.
-const BUILD_VERSION = 'Uruapan';
+const BUILD_VERSION = 'Veracruz';
 let DATA = { prendas: [], usos: [], outfits_sugeridos: [], perfil: [], fotos_origen: [] };
 let showTrash = false;
 let soloFavoritos = false;
@@ -433,9 +433,24 @@ async function refreshData(){
     DATA = normalizeData(r.data);
     if(r.sheetUrl) SHEET_URL = r.sheetUrl;
     await backfillFotosOrigen();
+    restaurarPreferenciasDesdePerfil();
     localStorage.setItem('ropa_data_cache', JSON.stringify(DATA));
     renderAllScreens();
   }
+}
+// Los Moldes y la elección de maniquí (género/estatura/peinado) se
+// respaldan en el Perfil del backend (ver guardarCampoPerfil) — esto los
+// recupera de ahí cada vez que se refresca la app, para que un celular o
+// navegador nuevo (o uno con el caché borrado) no empiece de cero.
+function restaurarPreferenciasDesdePerfil(){
+  const p = DATA.perfil.find(x=>x.ID==='perfil-unico') || DATA.perfil[0];
+  if(!p) return;
+  if(p.MoldesJSON){
+    try{ MOLDES_USUARIO = JSON.parse(p.MoldesJSON)||{}; localStorage.setItem(MOLDES_KEY, JSON.stringify(MOLDES_USUARIO)); }catch(e){}
+  }
+  if(p.ManiquiGenero) localStorage.setItem('ropa_maniqui_genero', p.ManiquiGenero);
+  if(p.ManiquiEstatura) localStorage.setItem('ropa_maniqui_estatura', p.ManiquiEstatura);
+  if(p.ManiquiPeinado) localStorage.setItem('ropa_maniqui_peinado', p.ManiquiPeinado);
 }
 // Prendas creadas antes de que existiera la tabla FOTOS_ORIGEN nunca
 // escribieron su fila ahí, así que "Fotos subidas" (que lee solo de esa
@@ -907,7 +922,14 @@ const MOLDES_KEY = 'ropa_moldes_v1';
 // (nunca se sobrescribe el default) — así "↺ Volver al original" siempre
 // puede regresar exactamente al valor de fábrica.
 let MOLDES_USUARIO = (function(){ try{ return JSON.parse(localStorage.getItem(MOLDES_KEY))||{}; }catch(e){ return {}; } })();
-function guardarMoldesUsuario(){ try{ localStorage.setItem(MOLDES_KEY, JSON.stringify(MOLDES_USUARIO)); }catch(e){} }
+// Se guarda en localStorage AL INSTANTE (para que responda ya) y además
+// se manda al backend (Sheet) sin bloquear — pedido explícito: los
+// moldes ajustados no deben vivir solo en la caché del navegador, tienen
+// que sobrevivir un cambio de celular/navegador o un caché borrado.
+function guardarMoldesUsuario(){
+  try{ localStorage.setItem(MOLDES_KEY, JSON.stringify(MOLDES_USUARIO)); }catch(e){}
+  guardarCampoPerfil('MoldesJSON', JSON.stringify(MOLDES_USUARIO));
+}
 function moldeBase(clave){ return MOLDES_BASE.find(m=>m.clave===clave) || null; }
 // Regla efectiva de un molde = default + lo que la usuaria haya ajustado.
 function reglaMolde(clave){
@@ -3308,6 +3330,7 @@ async function refrescarVestidorManiqui(){
 // esperar a que se genere el maniquí en blanco.
 async function elegirGeneroManiqui(genero){
   localStorage.setItem('ropa_maniqui_genero', genero);
+  guardarCampoPerfil('ManiquiGenero', genero);
   document.getElementById('chipManiquiMujer').classList.toggle('active', genero==='mujer');
   document.getElementById('chipManiquiHombre').classList.toggle('active', genero==='hombre');
   showToast('Preparando maniquí de '+genero+'…');
@@ -3320,6 +3343,7 @@ async function elegirGeneroManiqui(genero){
 // la usuaria), con "media" y "alta" como opciones aparte.
 async function elegirEstaturaManiqui(estatura){
   localStorage.setItem('ropa_maniqui_estatura', estatura);
+  guardarCampoPerfil('ManiquiEstatura', estatura);
   document.getElementById('chipEstaturaChaparrita').classList.toggle('active', estatura==='chaparrita');
   document.getElementById('chipEstaturaMedia').classList.toggle('active', estatura==='media');
   document.getElementById('chipEstaturaAlta').classList.toggle('active', estatura==='alta');
@@ -3333,6 +3357,7 @@ async function elegirEstaturaManiqui(estatura){
 // oscuro sueltas o recogidas, además de la opción sin pelo de siempre.
 async function elegirPeinadoManiqui(peinado){
   localStorage.setItem('ropa_maniqui_peinado', peinado);
+  guardarCampoPerfil('ManiquiPeinado', peinado);
   const chips = { ninguno:'chipPeinadoNinguno', suelto:'chipPeinadoSuelto', coleta:'chipPeinadoColeta', chongo:'chipPeinadoChongo', trenza:'chipPeinadoTrenza' };
   Object.entries(chips).forEach(([k,id])=> document.getElementById(id).classList.toggle('active', k===peinado));
   const genero = localStorage.getItem('ropa_maniqui_genero')||'mujer';
@@ -3455,18 +3480,32 @@ function pedirEliminarFotoOrigen(url){
 }
 async function guardarPerfil(){
   const idx = DATA.perfil.findIndex(x=>x.ID===PERFIL_ID);
-  const row = {
+  const anterior = idx>=0 ? DATA.perfil[idx] : {};
+  const row = Object.assign({}, anterior, {
     ID: PERFIL_ID,
     TonoPiel: document.getElementById('perfilTono').value,
     Subtono: document.getElementById('perfilSubtono').value,
     Ciudad: document.getElementById('perfilCiudad').value,
-    Nombre: '',
-    Notas: idx>=0 ? (DATA.perfil[idx].Notas||'') : '' // este botón no toca las notas, se guardan solas
-  };
+    Nombre: ''
+    // Notas/MoldesJSON/ManiquiGenero/ManiquiEstatura/ManiquiPeinado se
+    // guardan solos desde sus propios lugares — este botón no debe
+    // pisarlos, por eso se parte de "anterior" en vez de un row en blanco.
+  });
   if(idx>=0) DATA.perfil[idx] = row; else DATA.perfil.push(row);
   localStorage.setItem('ropa_data_cache', JSON.stringify(DATA));
   await apiPost('saveRow', { table:'PERFIL', row });
   showToast('Perfil guardado');
+}
+// Guarda UN campo del Perfil sin pisar los demás (Tono, Notas, Moldes,
+// etc.) — usado por todo lo que se respalda en el backend aparte del
+// botón "Guardar perfil" (moldes, elección de maniquí).
+async function guardarCampoPerfil(campo, valor){
+  const idx = DATA.perfil.findIndex(x=>x.ID===PERFIL_ID);
+  const anterior = idx>=0 ? DATA.perfil[idx] : { ID: PERFIL_ID };
+  const row = Object.assign({}, anterior, { [campo]: valor });
+  if(idx>=0) DATA.perfil[idx] = row; else DATA.perfil.push(row);
+  localStorage.setItem('ropa_data_cache', JSON.stringify(DATA));
+  await apiPost('saveRow', { table:'PERFIL', row });
 }
 // Notas libres en Perfil: se guardan solas 800ms después de dejar de
 // escribir (debounce, no en cada tecla) tanto en localStorage (al
