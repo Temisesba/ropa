@@ -321,7 +321,7 @@ let SHEET_URL = '';
 // Nombre-landmark de esta versión — cámbialo en cada cambio que se
 // despliegue, así se puede saber a simple vista (en Perfil) si el
 // celular ya está viendo lo último o una copia vieja en caché.
-const BUILD_VERSION = 'Campeche';
+const BUILD_VERSION = 'Chiapas';
 let DATA = { prendas: [], usos: [], outfits_sugeridos: [], perfil: [], fotos_origen: [] };
 let showTrash = false;
 let soloFavoritos = false;
@@ -1086,7 +1086,15 @@ function quitarFondoColor(dataUrl, claveHex, tolerancia){
 // correcto, no una falla) — en su lugar se valida directamente que las
 // esquinas queden transparentes, que no sobre color clave, y que la
 // prenda no haya quedado invisible (bbox mínimo).
-function capaEsValida(recorte){
+// Bolsos/Accesorios/Calzado nunca deberían ocupar casi toda la altura del
+// lienzo — si el bbox llega a ese tamaño, casi seguro es que la IA dibujó
+// el maniquí completo (o gran parte del cuerpo) en vez de solo la prenda,
+// a pesar de que el prompt lo prohíbe explícitamente (visto real: un
+// bolso cruzado generado con el maniquí desnudo completo debajo, que pasó
+// las demás validaciones porque el fondo SÍ se quitó bien alrededor del
+// cuerpo — el problema no era el color, era el contenido).
+const CATEGORIA_ALTURA_MAX = { Bolsos: 55, Accesorios: 55, Calzado: 40 };
+function capaEsValida(recorte, categoria){
   if(!recorte) return false;
   if(recorte.ancho!==MANIQUI_CANVAS.w || recorte.alto!==MANIQUI_CANVAS.h) return false;
   if(recorte.pctRemovido<=0.02) return false; // no se quitó casi nada del fondo
@@ -1094,6 +1102,8 @@ function capaEsValida(recorte){
   if(recorte.alfaEsquinas>40) return false; // las esquinas (casi siempre fondo) deberían quedar transparentes
   const areaPrenda = (recorte.bboxPct.w/100) * (recorte.bboxPct.h/100);
   if(areaPrenda<0.02) return false; // la prenda quedó casi invisible
+  const alturaMax = CATEGORIA_ALTURA_MAX[categoria];
+  if(alturaMax && recorte.bboxPct.h>alturaMax) return false; // parece traer todo el cuerpo del maniquí
   return true;
 }
 function escanearBboxAlfa(ctx, W, H){
@@ -1246,7 +1256,7 @@ async function crearFilaPrenda(it, origenUrl){
         // demasiado, o dejó un bloque del color clave sin quitar en algún
         // lado — probado en pruebas reales), mejor guardar sin capa que
         // subir algo roto.
-        if(capaEsValida(recorte)){
+        if(capaEsValida(recorte, it.categoria)){
           // Enfoque híbrido determinista: la posición final la decide el
           // código con anclas fijas (reposicionarCapa), no la referencia
           // visual del maniquí que le mandamos a la IA — esa referencia
@@ -1838,7 +1848,7 @@ async function regenerarCapaDesdeImagen(p, dataUrl, feedback, btn, textoBtnNorma
   });
   if(!gen.ok){ showToast('No se pudo generar: '+(gen.error||'')); if(btn){ btn.disabled=false; btn.textContent=textoBtnNormal; } return false; }
   const recorte = await quitarFondoColor('data:'+(gen.mimeType||'image/jpeg')+';base64,'+gen.imageBase64, clave.hex);
-  if(!capaEsValida(recorte)){
+  if(!capaEsValida(recorte, p.Categoria)){
     showToast('El resultado no quedó bien (fondo mal quitado o chocó con la prenda) — intenta de nuevo');
     if(btn){ btn.disabled=false; btn.textContent=textoBtnNormal; }
     return false;
