@@ -344,14 +344,20 @@ let SHEET_URL = '';
 // Nombre-landmark de esta versión — cámbialo en cada cambio que se
 // despliegue, así se puede saber a simple vista (en Perfil) si el
 // celular ya está viendo lo último o una copia vieja en caché.
-const BUILD_VERSION = 'Acapulco';
+const BUILD_VERSION = 'Bacalar';
 let DATA = { prendas: [], usos: [], outfits_sugeridos: [], perfil: [], fotos_origen: [] };
 let showTrash = false;
 let soloFavoritos = false;
 let activeCategoria = 'Todas';
 
-const CATEGORIAS = ['Calzado','Ropa superior','Ropa inferior','Vestidos','Abrigos','Accesorios','Bolsos','Ropa interior','Deportiva'];
-const CATEGORIA_ICONO = {'Calzado':'👟','Ropa superior':'👕','Ropa inferior':'👖','Vestidos':'👗','Abrigos':'🧥','Accesorios':'🧣','Bolsos':'👜','Ropa interior':'🩲','Deportiva':'🏃'};
+// "Cabello" es una categoría normal a propósito — pedido explícito: la
+// peluca/cabello debe poder ajustarse, moverse, cambiarse con swipe,
+// recortarse (Borrador) y agregarse desde foto igual que cualquier otra
+// prenda, en vez de ser un "addon" aparte del maniquí con reglas propias.
+// (El selector de peinado en Perfil sigue existiendo aparte, como opción
+// rápida de cabello por defecto — no se estorban entre sí.)
+const CATEGORIAS = ['Calzado','Ropa superior','Ropa inferior','Vestidos','Abrigos','Accesorios','Cabello','Bolsos','Ropa interior','Deportiva'];
+const CATEGORIA_ICONO = {'Calzado':'👟','Ropa superior':'👕','Ropa inferior':'👖','Vestidos':'👗','Abrigos':'🧥','Accesorios':'🧣','Cabello':'💇','Bolsos':'👜','Ropa interior':'🩲','Deportiva':'🏃'};
 const FORMALIDADES = ['Casual','Trabajo','Formal','Deportivo','Fiesta'];
 
 // Catálogo, Vestidor ("solo prendas"), Hoy, Olvidados, revisión de
@@ -975,6 +981,7 @@ const MOLDES_BASE = [
   { clave:'zapatos',      nombre:'Zapatos / tacones',    grupo:'Calzado',     patrones:['zapato','tacon','mocasin','balerina','flat','zapatilla'],                        regla:{ ancho:30, vAlign:'bottom', anclaY:93.0, xCentro:50 } },
   // Accesorios
   { clave:'gorro',        nombre:'Gorro / gorra / sombrero', grupo:'Accesorios', patrones:['sombrero','gorra','gorro','boina','beanie'],                                  regla:{ ancho:32, vAlign:'top', anclaY:4.0,  xCentro:50 } },
+  { clave:'cabello',      nombre:'Cabello / peluca',     grupo:'Cabello',     patrones:['cabello','pelo','peluca','extension','extensiones'],                            regla:{ ancho:40, vAlign:'top', anclaY:2.0,  xCentro:50 } },
   { clave:'lentes',       nombre:'Lentes',               grupo:'Accesorios',  patrones:['lente','gafas','anteojo'],                                                      regla:{ ancho:26, vAlign:'top', anclaY:14.0, xCentro:50 } },
   { clave:'aretes',       nombre:'Aretes',               grupo:'Accesorios',  patrones:['arete','pendiente'],                                                            regla:{ ancho:8,  vAlign:'top', anclaY:10.0, xCentro:50 } },
   { clave:'bufanda',      nombre:'Bufanda / pañuelo',    grupo:'Accesorios',  patrones:['bufanda','panuelo','mascada','chalina'],                                        regla:{ ancho:26, vAlign:'top', anclaY:16.0, xCentro:50 } },
@@ -1654,7 +1661,7 @@ function diasDesde(fechaISO){
   const ms = Date.now() - new Date(fechaISO).getTime();
   return Math.floor(ms/86400000);
 }
-function renderCatalogo(){
+async function renderCatalogo(){
   const chips = document.getElementById('catChips');
   chips.innerHTML = ['👗 Outfits', 'Todas', ...CATEGORIAS].map(c=>
     `<button class="chip ${c===activeCategoria?'active':''}" onclick="activeCategoria='${c}';renderCatalogo()">${c==='Todas'?'Todas':c==='👗 Outfits'?c:CATEGORIA_ICONO[c]+' '+c}</button>`
@@ -1664,8 +1671,11 @@ function renderCatalogo(){
     document.getElementById('papeleraAcciones').innerHTML = '';
     const grid = document.getElementById('catGrid');
     const guardados = DATA.outfits_sugeridos.filter(o=>!o.Fecha && !esVerdadero(o.Papelera));
-    grid.innerHTML = guardados.length ? guardados.map(outfitGuardadoCardHtml).join('')
-      : '<p class="hint">Todavía no guardaste ningún outfit — desde "👗 Vestidor" arma uno o pide ideas, y dale "💾 Guardar".</p>';
+    if(!guardados.length){ grid.innerHTML = '<p class="hint">Todavía no guardaste ningún outfit — desde "👗 Vestidor" arma uno o pide ideas, y dale "💾 Guardar".</p>'; return; }
+    const genero = localStorage.getItem('ropa_maniqui_genero')||'mujer';
+    const maniquiInfo = await maniquiConPeinadoHtml(genero);
+    if(!document.getElementById('catGrid') || activeCategoria!=='👗 Outfits') return; // se cambió de pantalla/chip mientras cargaba
+    grid.innerHTML = `<div style="display:flex;gap:10px;flex-wrap:wrap">${guardados.map(o=>outfitGuardadoCardHtml(o, maniquiInfo)).join('')}</div>`;
     return;
   }
   document.getElementById('btnFav').classList.toggle('active', soloFavoritos);
@@ -2070,7 +2080,8 @@ async function abrirBorrador(p){
       <button class="chip" id="modoClonar">🧵 Clonar (traer tela)</button>
     </div>
     <p class="hint" style="text-align:center;margin-top:4px" id="clonEstado"></p>
-    <div style="max-width:280px;max-height:55vh;overflow:auto;margin:10px auto 0;border-radius:10px;border:1px solid var(--border)">
+    <p class="hint" style="text-align:center;margin-top:4px">📌 Con dos dedos te mueves por la imagen sin borrar nada</p>
+    <div id="borradorScrollWrap" style="max-width:280px;max-height:55vh;overflow:auto;margin:10px auto 0;border-radius:10px;border:1px solid var(--border)">
       <div class="maniqui-doll-wrap" id="borradorWrap" style="max-width:none;margin:0">
         ${maniquiInfo.html}
         <canvas id="borradorCanvas" style="position:absolute;inset:0;width:100%;height:100%;touch-action:none"></canvas>
@@ -2212,7 +2223,30 @@ async function abrirBorrador(p){
     }
     bctx.putImageData(imgData,0,0);
   }
+  // Con dos dedos a la vez, mover la vista (scroll) en vez de dibujar —
+  // pedido explícito: al hacer zoom para llegar a un detalle fino, con un
+  // solo dedo no había forma de desplazarse sin borrar algo sin querer
+  // (no hay mouse en el celular). "touch-action:none" en el canvas ya
+  // bloquea el paneo nativo del navegador (lo necesita para dibujar con
+  // un dedo), así que el paneo con dos dedos se maneja a mano aquí.
+  const scrollWrap = document.getElementById('borradorScrollWrap');
+  const punteros = new Map();
+  let panActivo = null;
+  const centroide = ()=>{
+    const pts = Array.from(punteros.values());
+    return { x:(pts[0].x+pts[1].x)/2, y:(pts[0].y+pts[1].y)/2 };
+  };
   canvas.addEventListener('pointerdown', e=>{
+    punteros.set(e.pointerId, { x:e.clientX, y:e.clientY });
+    canvas.setPointerCapture(e.pointerId);
+    if(punteros.size>=2){
+      // Dos dedos: cancela cualquier trazo que se hubiera empezado con el
+      // primer dedo y pasa a modo paneo.
+      activo = false;
+      ctx.clearRect(0,0,canvas.width,canvas.height); ctx.drawImage(buffer,0,0);
+      panActivo = { centro: centroide(), scrollLeft: scrollWrap.scrollLeft, scrollTop: scrollWrap.scrollTop };
+      return;
+    }
     const pos = posEnCanvas(e);
     if(modo==='varita'){
       guardarHistorial();
@@ -2228,7 +2262,7 @@ async function abrirBorrador(p){
       clonEstado.textContent = 'Listo — ahora arrastra donde falta tela';
       return;
     }
-    activo = true; canvas.setPointerCapture(e.pointerId);
+    activo = true;
     inicio = pos; ultimo = pos;
     guardarHistorial();
     if(modo==='libre') borrarCirculo(bctx, inicio, grosor*escala());
@@ -2236,6 +2270,13 @@ async function abrirBorrador(p){
     ctx.clearRect(0,0,canvas.width,canvas.height); ctx.drawImage(buffer,0,0);
   });
   canvas.addEventListener('pointermove', e=>{
+    if(punteros.has(e.pointerId)) punteros.set(e.pointerId, { x:e.clientX, y:e.clientY });
+    if(panActivo && punteros.size>=2){
+      const c = centroide();
+      scrollWrap.scrollLeft = panActivo.scrollLeft - (c.x - panActivo.centro.x);
+      scrollWrap.scrollTop = panActivo.scrollTop - (c.y - panActivo.centro.y);
+      return;
+    }
     if(!activo) return;
     const pos = posEnCanvas(e);
     if(modo==='ovalo' || modo==='rectangulo'){
@@ -2256,13 +2297,17 @@ async function abrirBorrador(p){
       ctx.clearRect(0,0,canvas.width,canvas.height); ctx.drawImage(buffer,0,0);
     }
   });
-  canvas.addEventListener('pointerup', ()=>{
+  const soltarPuntero = e=>{
+    punteros.delete(e.pointerId);
+    if(punteros.size<2) panActivo = null;
     if(!activo) return;
     activo = false;
     if(modo==='ovalo' || modo==='rectangulo') dibujarFigura(bctx, false);
     if(modo==='linea') borrarLinea(bctx, inicio, ultimo, grosor*escala());
     ctx.clearRect(0,0,canvas.width,canvas.height); ctx.drawImage(buffer,0,0);
-  });
+  };
+  canvas.addEventListener('pointerup', soltarPuntero);
+  canvas.addEventListener('pointercancel', soltarPuntero);
   document.getElementById('borradorDeshacer').onclick = ()=>{
     if(!historial.length) return;
     bctx.putImageData(historial.pop(), 0, 0);
@@ -2736,22 +2781,38 @@ async function guardarNotaOutfit(id, notas){
   localStorage.setItem('ropa_data_cache', JSON.stringify(DATA));
   await apiPost('saveRow', { table:'OUTFITS_SUGERIDOS', row:o });
 }
+// La fecha queda editable directo en la tarjeta — pedido explícito: antes
+// solo se podía elegir al planificar, no corregirla después (ej. pasar de
+// "hoy" a "mañana" u otro día).
+async function guardarFechaOutfit(id, valorFecha){
+  const o = DATA.outfits_sugeridos.find(x=>x.ID===id); if(!o) return;
+  o.Fecha = valorFecha ? new Date(valorFecha).toISOString() : '';
+  localStorage.setItem('ropa_data_cache', JSON.stringify(DATA));
+  await apiPost('saveRow', { table:'OUTFITS_SUGERIDOS', row:o });
+  showToast('Fecha actualizada');
+  renderCalendario(); renderCatalogo();
+}
 // Tarjeta compartida entre "Outfits guardados" (Catálogo) y "Próximos
-// planeados" (Calendario) — mismas prendas, mismas acciones, el único
-// cambio es si se le muestra la fecha arriba.
-function outfitGuardadoCardHtml(o){
+// planeados" (Calendario) — mismas prendas, mismas acciones. "maniquiInfo"
+// se pide UNA sola vez por pantalla (no por tarjeta) y se pasa aquí, para
+// verse igual que las tarjetas de Ideas (prendas puestas sobre el
+// maniquí, no solo miniaturas sueltas).
+function outfitGuardadoCardHtml(o, maniquiInfo){
   let ids = []; try{ ids = JSON.parse(o.PrendaIDsJSON||'[]'); }catch(e){}
   const prendas = ids.map(id=>findPrenda(id)).filter(Boolean);
-  const fechaHtml = o.Fecha ? `<div class="tipo">📅 ${formatoFechaUso(o.Fecha)}${o.Evento?' — '+escAttr(o.Evento):''}</div>` : '';
-  return `<div class="card" style="width:100%;max-width:260px">
-    <div style="display:flex;gap:4px;flex-wrap:wrap;padding:8px">${prendas.length ? prendas.map(p=>fotoRecortadaHtml(p,{estilo:'width:56px;height:56px;object-fit:cover;border-radius:6px', clickable:false})).join('') : '<p class="hint">Esas prendas ya no están en tu catálogo.</p>'}</div>
-    <div class="body">
-      ${fechaHtml}
-      <textarea rows="2" placeholder="Notas…" style="width:100%;margin-top:6px" onchange="guardarNotaOutfit('${o.ID}', this.value)">${escAttr(o.Motivo||'')}</textarea>
-      <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:8px">
-        <button class="btn secondary" style="font-size:12px;padding:6px 10px" onclick='usarOutfitHoy(${JSON.stringify(ids)})'>Usar hoy</button>
-        <button class="remove" onclick="eliminarOutfitGuardado('${o.ID}')" title="Eliminar">🗑</button>
-      </div>
+  const capas = (maniquiInfo && maniquiInfo.cuerpo)
+    ? maniquiInfo.html + prendas.map(p=>p.FotoGeneradaURL?`<img class="maniqui-doll-capa-full" src="${p.FotoGeneradaURL}">`:'').join('')
+    : '';
+  const fechaVal = o.Fecha && !isNaN(new Date(o.Fecha).getTime()) ? new Date(o.Fecha).toISOString().slice(0,10) : '';
+  return `<div class="outfit-card" style="max-width:220px">
+    <div class="maniqui-doll-wrap" style="max-width:200px">${capas}</div>
+    <div class="outfit-items">${prendas.length ? prendas.map(p=>fotoRecortadaHtml(p,{estilo:'height:48px;flex:none'})).join('') : '<p class="hint">Esas prendas ya no están en tu catálogo.</p>'}</div>
+    <div class="field" style="margin-top:6px"><label class="hint">Fecha (opcional)</label><input type="date" value="${fechaVal}" onchange="guardarFechaOutfit('${o.ID}', this.value)"></div>
+    ${o.Evento ? `<p class="hint">${escAttr(o.Evento)}</p>` : ''}
+    <textarea rows="2" placeholder="Notas…" style="width:100%;margin-top:6px" onchange="guardarNotaOutfit('${o.ID}', this.value)">${escAttr(o.Motivo||'')}</textarea>
+    <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:8px">
+      <button class="btn secondary" style="font-size:12px;padding:6px 10px" onclick='usarOutfitHoy(${JSON.stringify(ids)})'>Usar hoy</button>
+      <button class="remove" onclick="eliminarOutfitGuardado('${o.ID}')" title="Eliminar">🗑</button>
     </div>
   </div>`;
 }
@@ -3130,15 +3191,17 @@ function dentroDelFiltroCalendario(fechaISO){
 // o.Fecha (que puede venir con hora si se guardó vía new Date().toISOString())
 // sin que "hoy pero más tarde" se cuente como pasado.
 function hoyYMD(){ return new Date().toISOString().slice(0,10); }
-function renderProximosPlaneados(){
+async function renderProximosPlaneados(){
   const cont = document.getElementById('proximosPlaneadosLista');
   if(!cont) return;
   const hoy = hoyYMD();
   const planeados = DATA.outfits_sugeridos.filter(o=>o.Fecha && !esVerdadero(o.Papelera) && o.Fecha.slice(0,10)>=hoy)
     .slice().sort((a,b)=> new Date(a.Fecha).getTime() - new Date(b.Fecha).getTime());
-  cont.innerHTML = planeados.length
-    ? `<div style="display:flex;gap:10px;flex-wrap:wrap">${planeados.map(outfitGuardadoCardHtml).join('')}</div>`
-    : '<p class="hint">Nada planeado todavía.</p>';
+  if(!planeados.length){ cont.innerHTML = '<p class="hint">Nada planeado todavía.</p>'; return; }
+  const genero = localStorage.getItem('ropa_maniqui_genero')||'mujer';
+  const maniquiInfo = await maniquiConPeinadoHtml(genero);
+  if(!document.getElementById('proximosPlaneadosLista')) return; // se cambió de pantalla mientras cargaba
+  cont.innerHTML = `<div style="display:flex;gap:10px;flex-wrap:wrap">${planeados.map(o=>outfitGuardadoCardHtml(o, maniquiInfo)).join('')}</div>`;
 }
 function renderCalendario(){
   renderProximosPlaneados();
