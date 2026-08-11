@@ -189,6 +189,7 @@ nav.tabbar button .ic{font-size:19px}
         <button class="btn ghost" onclick="toggleTrash()" id="btnTrash">🗑</button>
       </div>
       <div class="chips" id="catChips"></div>
+      <div id="papeleraAcciones"></div>
       <div class="grid" id="catGrid"></div>
     </section>
 
@@ -923,9 +924,11 @@ async function guardarDetecciones(){
   // ninguna prenda se queda en "0 usos" solo por ser recién creada.
   const fecha = d.fechaFoto ? new Date(d.fechaFoto).toISOString() : undefined;
   const todosLosIds = [];
+  let omitidasPorPapelera = 0;
   for(let i=0;i<d.items.length;i++){
     const it = d.items[i];
     if(it.matchId){ todosLosIds.push(it.matchId); continue; }
+    if(mejorCandidato(it, candidatosPapeleraParaPrenda(it.categoria))){ omitidasPorPapelera++; continue; }
     if(btn) btn.textContent = `Generando prenda ${i+1}/${d.items.length}…`;
     const row = await crearFilaPrenda(it, origenUrl);
     await apiPost('saveRow', { table:'PRENDAS', row });
@@ -941,7 +944,7 @@ async function guardarDetecciones(){
     }
   }
   localStorage.setItem('ropa_data_cache', JSON.stringify(DATA));
-  showToast('✓ Prendas guardadas');
+  showToast(omitidasPorPapelera ? `✓ Guardado (${omitidasPorPapelera} ya estaban en la papelera, no se recrearon)` : '✓ Prendas guardadas');
   uploadIndex++;
   procesarSiguienteFoto();
 }
@@ -981,6 +984,14 @@ async function analizarFotoParaHoy(recortada){
 }
 function candidatosParaPrenda(categoria){
   return DATA.prendas.filter(p=>!esVerdadero(p.Papelera) && p.Categoria===categoria);
+}
+// Antes de crear una prenda "nueva" (nadie la marcó como ya existente),
+// se revisa si se parece mucho a algo que YA está en la papelera — si es
+// así no se crea: quien la borró no espera que "regrese sola" cada vez
+// que se re-analiza la misma foto de origen (bug real: re-analizar tras
+// cada actualización recreaba prendas que ya se habían eliminado).
+function candidatosPapeleraParaPrenda(categoria){
+  return DATA.prendas.filter(p=>esVerdadero(p.Papelera) && p.Categoria===categoria);
 }
 // Quita acentos comparando por código de carácter (evita escribir marcas
 // Unicode combinadas literales en el código fuente, frágil de editar).
@@ -1110,6 +1121,7 @@ async function guardarRecortesHoy(){
   const prendaIds = [];
   for(const it of d.items){
     if(it.matchId){ prendaIds.push(it.matchId); continue; }
+    if(mejorCandidato(it, candidatosPapeleraParaPrenda(it.categoria))) continue;
     if(btn) btn.textContent = 'Generando prenda nueva…';
     const row = await crearFilaPrenda(it, origenUrl);
     await apiPost('saveRow', { table:'PRENDAS', row });
@@ -1149,6 +1161,9 @@ function renderCatalogo(){
     `<button class="chip ${c===activeCategoria?'active':''}" onclick="activeCategoria='${c}';renderCatalogo()">${c==='Todas'?'Todas':CATEGORIA_ICONO[c]+' '+c}</button>`
   ).join('');
   document.getElementById('btnFav').classList.toggle('active', soloFavoritos);
+  const papeleraLlena = DATA.prendas.some(p=>esVerdadero(p.Papelera));
+  document.getElementById('papeleraAcciones').innerHTML = (showTrash && papeleraLlena)
+    ? `<button class="btn ghost" style="margin-top:8px" onclick="vaciarPapelera()">🧹 Vaciar papelera (eliminar todo para siempre)</button>` : '';
   const q = (document.getElementById('catSearch').value||'').toLowerCase();
   let items = DATA.prendas.filter(p=> esVerdadero(p.Papelera) === showTrash);
   if(activeCategoria!=='Todas') items = items.filter(p=>p.Categoria===activeCategoria);
@@ -1214,6 +1229,18 @@ function borrarPermanente(id){
     localStorage.setItem('ropa_data_cache', JSON.stringify(DATA));
     renderCatalogo();
     showToast('Eliminada definitivamente');
+  });
+}
+function vaciarPapelera(){
+  const items = DATA.prendas.filter(p=>esVerdadero(p.Papelera));
+  if(!items.length) return;
+  confirmarEliminar(`Se eliminarán para siempre las ${items.length} prenda${items.length===1?'':'s'} de la papelera — no se puede deshacer.`, async ()=>{
+    showToast('Vaciando papelera…');
+    for(const p of items){ await apiPost('deleteRow', { table:'PRENDAS', id:p.ID }); }
+    DATA.prendas = DATA.prendas.filter(p=>!esVerdadero(p.Papelera));
+    localStorage.setItem('ropa_data_cache', JSON.stringify(DATA));
+    renderCatalogo();
+    showToast('Papelera vacía');
   });
 }
 // Muestra cada registro de uso de esta prenda, más reciente primero —
