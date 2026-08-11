@@ -108,20 +108,25 @@ nav.tabbar button .ic{font-size:19px}
 .crop-handle[data-corner="sw"]{left:0;top:100%;cursor:nesw-resize}
 .crop-handle[data-corner="se"]{left:100%;top:100%;cursor:nwse-resize}
 
-/* tablero de outfit (maniquí virtual) — un solo cuadro grande, la
-   categoría activa se elige con chips arriba, swipe/flechas para
-   recorrer esa categoría (cada prenda ya generada sobre el mismo
-   maniquí, ver FotoManiquiURL) */
-.maniqui-wrap{max-width:280px;margin:10px auto 0}
-.maniqui-slot-unico{position:relative;width:100%;min-height:320px;display:flex;align-items:center;justify-content:center;background:var(--bg-card);border-radius:var(--radius);touch-action:pan-y;box-shadow:var(--shadow)}
-.maniqui-slot-unico img{max-width:82%;max-height:320px;object-fit:contain;cursor:zoom-in}
-.maniqui-etiqueta{position:absolute;bottom:8px;left:50%;transform:translateX(-50%);font-size:12px;background:rgba(0,0,0,.55);color:#fff;padding:3px 10px;border-radius:999px;white-space:nowrap;max-width:90%;overflow:hidden;text-overflow:ellipsis}
-.maniqui-arrow{position:absolute;top:50%;transform:translateY(-50%);width:36px;height:36px;border-radius:50%;background:var(--bg-card);border:1px solid var(--border);font-size:18px;z-index:6;box-shadow:var(--shadow)}
-.maniqui-arrow.left{left:-12px}
-.maniqui-arrow.right{right:-12px}
+/* Vestidor: 3 capas apiladas (arriba/abajo/calzado), cada una con la
+   foto "de catálogo" (efecto maniquí fantasma) de la prenda activa en
+   esa categoría — se ven las 3 a la vez, como piezas de un mismo outfit,
+   sin generar nada nuevo al deslizar (instantáneo). */
+.vestidor-stack{display:flex;flex-direction:column;gap:6px;max-width:280px;margin:10px auto 0}
+.vestidor-capa{position:relative;min-height:130px;display:flex;align-items:center;justify-content:center;background:var(--bg-card);border-radius:var(--radius);touch-action:pan-y;box-shadow:var(--shadow)}
+.vestidor-capa.superior{min-height:170px}
+.vestidor-capa.inferior{min-height:150px}
+.vestidor-capa.calzado{min-height:110px}
+.vestidor-capa img{max-width:78%;max-height:100%;object-fit:contain;cursor:zoom-in}
+.maniqui-etiqueta{position:absolute;bottom:6px;left:50%;transform:translateX(-50%);font-size:11px;background:rgba(0,0,0,.55);color:#fff;padding:2px 9px;border-radius:999px;white-space:nowrap;max-width:90%;overflow:hidden;text-overflow:ellipsis}
+.maniqui-arrow{position:absolute;top:50%;transform:translateY(-50%);width:34px;height:34px;border-radius:50%;background:var(--bg-card);border:1px solid var(--border);font-size:18px;z-index:6;box-shadow:var(--shadow)}
+.maniqui-arrow.left{left:-10px}
+.maniqui-arrow.right{right:-10px}
 
 /* outfits */
 .outfit-card{background:var(--bg-card);border-radius:var(--radius);box-shadow:var(--shadow);padding:14px;margin-top:12px}
+.outfit-idea-img{min-height:60px;display:flex;align-items:center;justify-content:center}
+.outfit-idea-img img{max-width:100%;border-radius:12px;cursor:zoom-in}
 .outfit-items{display:flex;gap:8px;overflow-x:auto;margin:10px 0}
 .outfit-items img{width:64px;height:64px;object-fit:cover;border-radius:8px;flex:none;background:var(--accent-soft)}
 .outfit-motivo{font-size:13px;color:var(--text-soft)}
@@ -210,7 +215,11 @@ nav.tabbar button .ic{font-size:19px}
     </section>
 
     <section class="screen" id="screen-sugerencias">
-      <h2>Sugerencias</h2>
+      <h2>Vestidor</h2>
+      <div id="tableroOutfitArea"></div>
+
+      <h3 style="margin-top:30px">Ideas</h3>
+      <p class="hint">La IA arma 2-3 outfits completos con tu catálogo, cada uno en su propio maniquí.</p>
       <div class="field"><label class="hint">Evento</label>
         <select id="sugEvento"><option>Casual</option><option>Trabajo</option><option>Formal</option><option>Deportivo</option><option>Cita</option><option>Fiesta</option><option>Otro</option></select>
       </div>
@@ -220,11 +229,8 @@ nav.tabbar button .ic{font-size:19px}
           <button class="btn secondary" onclick="usarClimaAutomatico()">📍 Usar mi ubicación</button>
         </div>
       </div>
-      <button class="btn" onclick="pedirSugerencias()">✨ Pedir sugerencias</button>
+      <button class="btn" onclick="pedirSugerencias()">✨ Pedir ideas</button>
       <div id="sugResultados"></div>
-
-      <button class="btn secondary" style="margin-top:22px" onclick="toggleTableroOutfit()" id="btnTablero">👗 Armar outfit a mano</button>
-      <div id="tableroOutfitArea" class="hidden"></div>
     </section>
 
     <section class="screen" id="screen-olvidados">
@@ -257,6 +263,12 @@ nav.tabbar button .ic{font-size:19px}
         <select id="perfilSubtono"><option value="">Sin definir</option><option>Frío</option><option>Cálido</option><option>Neutro</option></select>
       </div>
       <div class="field"><label class="hint">Ciudad (para el clima)</label><input type="text" id="perfilCiudad" placeholder="Ciudad de México"></div>
+      <div class="field"><label class="hint">Maniquí del Vestidor (genérico, no eres tú)</label>
+        <div class="chips">
+          <button class="chip" id="chipManiquiMujer" onclick="elegirGeneroManiqui('mujer')">🧍‍♀️ Mujer</button>
+          <button class="chip" id="chipManiquiHombre" onclick="elegirGeneroManiqui('hombre')">🧍 Hombre</button>
+        </div>
+      </div>
       <button class="btn" onclick="guardarPerfil()">Guardar perfil</button>
 
       <h3 style="margin-top:26px">Fotos subidas</h3>
@@ -272,7 +284,7 @@ nav.tabbar button .ic{font-size:19px}
     <button data-tab="subir" onclick="switchTab('subir')"><span class="ic">📷</span>Subir</button>
     <button data-tab="catalogo" onclick="switchTab('catalogo')"><span class="ic">🗂️</span>Catálogo</button>
     <button data-tab="hoy" onclick="switchTab('hoy')"><span class="ic">✅</span>Hoy</button>
-    <button data-tab="sugerencias" onclick="switchTab('sugerencias')"><span class="ic">✨</span>Ideas</button>
+    <button data-tab="sugerencias" onclick="switchTab('sugerencias')"><span class="ic">👗</span>Vestidor</button>
     <button data-tab="olvidados" onclick="switchTab('olvidados')"><span class="ic">⏳</span>Olvidados</button>
     <button data-tab="perfil" onclick="switchTab('perfil')"><span class="ic">⚙️</span>Perfil</button>
   </nav>
@@ -351,8 +363,19 @@ async function refreshData(){
   if(r && r.ok){
     DATA = normalizeData(r.data);
     if(r.sheetUrl) SHEET_URL = r.sheetUrl;
+    await backfillFotosOrigen();
     localStorage.setItem('ropa_data_cache', JSON.stringify(DATA));
     renderAllScreens();
+  }
+}
+// Prendas creadas antes de que existiera la tabla FOTOS_ORIGEN nunca
+// escribieron su fila ahí, así que "Fotos subidas" (que lee solo de esa
+// tabla) las omitía aunque la prenda siguiera teniendo FotoOrigenURL —
+// se ponían al día solas la primera vez que se recargaban.
+async function backfillFotosOrigen(){
+  const urls = new Set(DATA.prendas.map(p=>p.FotoOrigenURL).filter(Boolean));
+  for(const url of urls){
+    if(!DATA.fotos_origen.find(f=>f.URL===url)) await registrarFotoOrigenSiFalta(url);
   }
 }
 function renderAllScreens(){
@@ -365,6 +388,7 @@ function switchTab(name){
   document.querySelectorAll('nav.tabbar button').forEach(b=>b.classList.toggle('active', b.dataset.tab===name));
   if(name==='catalogo') renderCatalogo();
   if(name==='hoy') renderHoy();
+  if(name==='sugerencias') abrirVestidor();
   if(name==='olvidados') renderOlvidados();
   if(name==='perfil') renderPerfilScreen();
 }
@@ -683,36 +707,33 @@ function cropDataUrl(sourceCanvas, width, height, caja){
 // arma la fila lista para guardar. Si la generación falla (Gemini no
 // genera imágenes vía Claude, no hay respaldo posible), se usa el recorte
 // real como FotoURL — nunca se bloquea el guardado por esto.
+// FotoGeneradaURL = foto "de catálogo" (prenda aislada, efecto maniquí
+// fantasma) — es la que se ve tanto en el catálogo como, apilada por CSS
+// junto a las otras dos categorías, en el Vestidor. Ya NO se genera una
+// foto aparte con la prenda puesta sobre el maniquí compartido (eso ahora
+// solo se usa, bajo demanda, para las 3 Ideas de outfit al fondo del
+// Vestidor) — así crear cada prenda vuelve a ser una sola llamada de IA.
 async function crearFilaPrenda(it, origenUrl){
   let fotoRealUrl = '';
   if(it.caja && it.cropPreview){
     const subCrop = await apiPost('uploadImage', { imageBase64: it.cropPreview.split(',')[1], mimeType:'image/jpeg', fileName:'prenda-'+Date.now()+'.jpg' });
     if(subCrop.ok) fotoRealUrl = subCrop.url;
   }
-  // Una sola llamada de generación por prenda (no dos): la prenda real se
-  // pone directo sobre el maniquí compartido, y esa misma imagen sirve de
-  // foto de catálogo — ya no se genera antes una versión aislada "fantasma"
-  // aparte, pedido explícito para que crear cada prenda sea más rápido. Si
-  // esto falla no se bloquea el guardado: obtenerFotoManiqui la genera
-  // sola después si hace falta, usando el recorte real como referencia.
-  let fotoManiquiUrl = '';
+  let fotoGeneradaUrl = '';
   if(it.cropPreview){
-    const maniqui = await obtenerManiquiBase(localStorage.getItem('ropa_maniqui_genero')||'mujer');
-    if(maniqui){
-      const rManiqui = await apiPost('generarOutfitEnManiqui', {
-        maniquiBase64: maniqui.base64, maniquiMimeType: maniqui.mimeType,
-        prendas: [{ base64: it.cropPreview.split(',')[1], mimeType:'image/jpeg', categoria: it.categoria }]
-      });
-      if(rManiqui.ok){
-        const subManiqui = await apiPost('uploadImage', { imageBase64: rManiqui.imageBase64, mimeType: rManiqui.mimeType||'image/jpeg', fileName:'maniqui-prenda-'+Date.now()+'.jpg' });
-        if(subManiqui.ok) fotoManiquiUrl = subManiqui.url;
-      }
+    const gen = await apiPost('generarFotoCatalogo', {
+      imageBase64: it.cropPreview.split(',')[1], mimeType:'image/jpeg',
+      categoria: it.categoria, tipo: it.tipo, color: it.color, colorSecundario: it.colorSecundario, estampado: it.estampado
+    });
+    if(gen.ok){
+      const subGen = await apiPost('uploadImage', { imageBase64: gen.imageBase64, mimeType: gen.mimeType||'image/jpeg', fileName:'catalogo-'+Date.now()+'.jpg' });
+      if(subGen.ok) fotoGeneradaUrl = subGen.url;
     }
   }
   return {
     ID: uid(), Categoria: it.categoria||'Ropa superior', Tipo: it.tipo||'', Color: it.color||'',
     ColorSecundario: it.colorSecundario||'', Estampado: it.estampado||'', Marca:'', Temporada:'',
-    Formalidad:'', FotoURL: fotoManiquiUrl||fotoRealUrl||origenUrl||'', FotoGeneradaURL: fotoManiquiUrl, FotoRealURL: fotoRealUrl, FotoOrigenURL: origenUrl||'', FotoManiquiURL: fotoManiquiUrl, FechaAlta: new Date().toISOString(),
+    Formalidad:'', FotoURL: fotoGeneradaUrl||fotoRealUrl||origenUrl||'', FotoGeneradaURL: fotoGeneradaUrl, FotoRealURL: fotoRealUrl, FotoOrigenURL: origenUrl||'', FotoManiquiURL:'', FechaAlta: new Date().toISOString(),
     UltimoUso:'', VecesUsado:0, Favorito:false, Notas:'', Papelera:false
   };
 }
@@ -1369,17 +1390,41 @@ async function pedirSugerencias(){
   const wrap = document.getElementById('sugResultados');
   wrap.innerHTML = '<p class="hint">Pensando outfits…</p>';
   const r = await apiPost('sugerirOutfit', { evento, clima, tonoPiel: perfil.TonoPiel||'', subtono: perfil.Subtono||'' });
-  if(!r.ok){ wrap.innerHTML = `<p class="hint">No se pudo generar sugerencias: ${r.error||'sin conexión'}</p>`; return; }
+  if(!r.ok){ wrap.innerHTML = `<p class="hint">No se pudo generar ideas: ${r.error||'sin conexión'}</p>`; return; }
   if(!r.outfits || !r.outfits.length){ wrap.innerHTML = '<p class="hint">La IA no encontró combinaciones — agrega más prendas al catálogo.</p>'; return; }
   const badgeModelo = r.modelo ? `<p class="hint">🤖 ${mensajeModelo(r,'Sugerido')}</p>` : '';
-  wrap.innerHTML = badgeModelo + r.outfits.map((o,i)=>{
-    const prendas = (o.prendaIds||[]).map(id=>findPrenda(id)).filter(Boolean);
-    return `<div class="outfit-card">
-      <div class="outfit-items">${prendas.map(p=> p.FotoURL?`<img src="${p.FotoURL}">`:`<div style="width:64px;height:64px;border-radius:8px;background:var(--accent-soft);display:flex;align-items:center;justify-content:center">${CATEGORIA_ICONO[p.Categoria]}</div>`).join('')}</div>
+  const ideas = r.outfits.map((o,i)=>({ motivo:o.motivo, prendaIds:o.prendaIds||[], prendas:(o.prendaIds||[]).map(id=>findPrenda(id)).filter(Boolean), _idx:i }));
+  wrap.innerHTML = badgeModelo + ideas.map(o=>`
+    <div class="outfit-card">
+      <div class="outfit-idea-img" id="ideaImg_${o._idx}"><p class="hint">Generando imagen del outfit…</p></div>
+      <div class="outfit-items">${o.prendas.map(p=> p.FotoURL?`<img src="${p.FotoURL}">`:`<div style="width:64px;height:64px;border-radius:8px;background:var(--accent-soft);display:flex;align-items:center;justify-content:center">${CATEGORIA_ICONO[p.Categoria]}</div>`).join('')}</div>
       <div class="outfit-motivo">${escAttr(o.motivo||'')}</div>
-      <button class="btn secondary" style="margin-top:10px" onclick='usarOutfitHoy(${JSON.stringify(o.prendaIds||[])})'>Usar hoy</button>
-    </div>`;
-  }).join('');
+      <button class="btn secondary" style="margin-top:10px" onclick='usarOutfitHoy(${JSON.stringify(o.prendaIds)})'>Usar hoy</button>
+    </div>`).join('');
+  const genero = localStorage.getItem('ropa_maniqui_genero')||'mujer';
+  for(const o of ideas) await generarIdeaEnManiqui(o, genero);
+}
+// Genera, una idea a la vez (no en paralelo, para no saturar la cuota de
+// Gemini), la imagen de esa combinación puesta en su propio maniquí —
+// distinto del vestidor de arriba, donde las prendas ya vienen listas y
+// no hace falta generar nada.
+async function generarIdeaEnManiqui(o, genero){
+  const cont = document.getElementById('ideaImg_'+o._idx);
+  if(!cont) return;
+  if(!o.prendas.length){ cont.innerHTML = ''; return; }
+  const maniqui = await obtenerManiquiBase(genero);
+  if(!maniqui){ cont.innerHTML = ''; return; }
+  const prendas = [];
+  for(const p of o.prendas){
+    if(!p.FotoURL) continue;
+    const info = await base64DeFotoURL(p.FotoURL);
+    if(info) prendas.push({ base64: info.base64, mimeType: info.mimeType, categoria: p.Categoria });
+  }
+  if(!prendas.length){ cont.innerHTML = ''; return; }
+  const r = await apiPost('generarOutfitEnManiqui', { maniquiBase64: maniqui.base64, maniquiMimeType: maniqui.mimeType, prendas });
+  if(!r.ok){ cont.innerHTML = ''; return; }
+  const subGen = await apiPost('uploadImage', { imageBase64: r.imageBase64, mimeType: r.mimeType||'image/jpeg', fileName:'idea-'+Date.now()+'.jpg' });
+  cont.innerHTML = subGen.ok ? `<img src="${subGen.url}" onclick="verFotoGrande('${subGen.url}')">` : '';
 }
 async function usarOutfitHoy(prendaIds){
   const fecha = new Date().toISOString();
@@ -1394,16 +1439,16 @@ async function usarOutfitHoy(prendaIds){
 }
 
 // ============================================================
-//  Tablero de outfit — "maniquí virtual" compartido: cada prenda, al
-//  verse aquí por primera vez, se genera puesta sobre el MISMO maniquí
-//  genérico (mismo cuerpo/pose/fondo, ver FotoManiquiURL) y se cachea —
-//  después deslizar entre prendas de una categoría es instantáneo, no
-//  genera una imagen nueva cada vez. Arriba se ve UNA sola prenda a la
-//  vez (la categoría activa, elegida con los chips); "🎨 Ver el outfit
-//  completo junto" combina TODO lo elegido en una sola imagen cuando de
-//  verdad se quiere ver el conjunto armado.
+//  Vestidor — 3 capas apiladas (arriba/abajo/calzado) siempre visibles a
+//  la vez, cada una mostrando la foto "de catálogo" (ya lista, ver
+//  FotoGeneradaURL) de la prenda activa en esa categoría. Deslizar dentro
+//  de una capa es instantáneo: solo cambia qué foto ya guardada se
+//  muestra, no genera nada nuevo. "💬 Feedback del outfit" pide una
+//  opinión corta de texto sobre la combinación elegida (rápido, sin
+//  imagen); las Ideas (abajo, ver pedirSugerencias) son las que sí valen
+//  la pena generar como imagen sobre un maniquí, una por combinación.
 // ============================================================
-let outfitBoard = null; // { superior, inferior, calzado, extras:Set, genero, categoriaActiva }
+let outfitBoard = null; // { superior, inferior, calzado, extras:Set }
 function itemsParaSlot(slot){
   const activos = DATA.prendas.filter(p=>!esVerdadero(p.Papelera));
   if(slot==='superior') return activos.filter(p=>p.Categoria==='Ropa superior'||p.Categoria==='Vestidos');
@@ -1414,39 +1459,15 @@ function itemsParaSlot(slot){
 function itemsParaExtras(){
   return DATA.prendas.filter(p=>!esVerdadero(p.Papelera) && ['Accesorios','Bolsos','Abrigos'].includes(p.Categoria));
 }
-function toggleTableroOutfit(){
-  const area = document.getElementById('tableroOutfitArea');
-  const abrir = area.classList.contains('hidden');
-  area.classList.toggle('hidden');
-  document.getElementById('btnTablero').textContent = abrir ? '👗 Ocultar armador' : '👗 Armar outfit a mano';
-  if(abrir){
-    if(!outfitBoard){
-      outfitBoard = { superior:null, inferior:null, calzado:null, extras:new Set(), genero: localStorage.getItem('ropa_maniqui_genero')||'mujer', categoriaActiva:'superior' };
-      ['superior','inferior','calzado'].forEach(slot=>{
-        const items = itemsParaSlot(slot);
-        if(items.length) outfitBoard[slot] = items[0].ID;
-      });
-    }
-    renderTableroOutfit();
+function abrirVestidor(){
+  if(!outfitBoard){
+    outfitBoard = { superior:null, inferior:null, calzado:null, extras:new Set() };
+    ['superior','inferior','calzado'].forEach(slot=>{
+      const items = itemsParaSlot(slot);
+      if(items.length) outfitBoard[slot] = items[0].ID;
+    });
   }
-}
-function elegirGeneroManiqui(genero){
-  outfitBoard.genero = genero;
-  localStorage.setItem('ropa_maniqui_genero', genero);
   renderTableroOutfit();
-}
-function cambiarCategoriaTablero(cat){
-  outfitBoard.categoriaActiva = cat;
-  renderTableroOutfit();
-}
-function cambiarSlot(delta){
-  const cat = outfitBoard.categoriaActiva;
-  const items = itemsParaSlot(cat);
-  if(!items.length) return;
-  const idxActual = items.findIndex(p=>p.ID===outfitBoard[cat]);
-  const idxNuevo = idxActual<0 ? 0 : (idxActual+delta+items.length)%items.length;
-  outfitBoard[cat] = items[idxNuevo].ID;
-  mostrarPrendaEnManiqui();
 }
 function toggleExtraOutfit(id){
   if(outfitBoard.extras.has(id)) outfitBoard.extras.delete(id); else outfitBoard.extras.add(id);
@@ -1455,26 +1476,66 @@ function toggleExtraOutfit(id){
 function renderTableroOutfit(){
   const area = document.getElementById('tableroOutfitArea');
   const extras = itemsParaExtras();
-  const nombreCat = { superior:'Arriba', inferior:'Abajo', calzado:'Calzado' };
   area.innerHTML = `
-    <div class="chips" style="justify-content:center">
-      ${['superior','inferior','calzado'].map(cat=>`<button class="chip ${outfitBoard.categoriaActiva===cat?'active':''}" onclick="cambiarCategoriaTablero('${cat}')">${nombreCat[cat]}</button>`).join('')}
+    <div class="vestidor-stack">
+      ${renderCapaOutfit('superior')}
+      ${renderCapaOutfit('inferior')}
+      ${renderCapaOutfit('calzado')}
     </div>
-    <div class="maniqui-wrap" id="maniquiUnico"></div>
     <p class="hint" style="text-align:center" id="resumenOutfit"></p>
     ${extras.length ? `<p class="hint" style="margin-top:10px">Agregar (opcional):</p>
     <div class="chips" style="flex-wrap:wrap">${extras.map(p=>`<button class="chip ${outfitBoard.extras.has(p.ID)?'active':''}" onclick="toggleExtraOutfit('${p.ID}')">${CATEGORIA_ICONO[p.Categoria]} ${escAttr(p.Tipo||p.Categoria)}</button>`).join('')}</div>` : ''}
-    <button class="btn" style="margin-top:14px" onclick="usarTableroOutfitHoy()">Usar este outfit hoy</button>
-    <p class="hint" style="text-align:center;margin-top:18px">Maniquí genérico (no eres tú):</p>
-    <div class="chips" style="justify-content:center">
-      <button class="chip ${outfitBoard.genero==='mujer'?'active':''}" onclick="elegirGeneroManiqui('mujer')">🧍‍♀️ Mujer</button>
-      <button class="chip ${outfitBoard.genero==='hombre'?'active':''}" onclick="elegirGeneroManiqui('hombre')">🧍 Hombre</button>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:14px">
+      <button class="btn" onclick="usarTableroOutfitHoy()">Usar este outfit hoy</button>
+      <button class="btn secondary" id="btnFeedbackOutfit" onclick="pedirFeedbackOutfit()">💬 Feedback del outfit</button>
     </div>
-    <button class="btn secondary" id="btnGenerarRealista" style="margin-top:10px" onclick="generarOutfitRealista()">🎨 Ver el outfit completo junto</button>
-    <div id="outfitRealistaArea"></div>
+    <div id="feedbackOutfitArea"></div>
   `;
-  mostrarPrendaEnManiqui();
+  ['superior','inferior','calzado'].forEach(slot=>{
+    const cont = document.getElementById('capaOutfit_'+slot);
+    if(cont) habilitarSwipeCapa(cont, slot);
+  });
   actualizarResumenOutfit();
+}
+function renderCapaOutfit(slot){
+  const nombreCat = { superior:'Arriba', inferior:'Abajo', calzado:'Calzado' };
+  const items = itemsParaSlot(slot);
+  if(!items.length){
+    return `<div class="vestidor-capa ${slot}"><p class="hint">${nombreCat[slot]}: sin prendas todavía</p></div>`;
+  }
+  if(!items.find(x=>x.ID===outfitBoard[slot])) outfitBoard[slot] = items[0].ID;
+  const p = items.find(x=>x.ID===outfitBoard[slot]);
+  const flechas = items.length>1;
+  return `<div class="vestidor-capa ${slot}" id="capaOutfit_${slot}">
+    ${flechas?`<button class="maniqui-arrow left" onclick="cambiarPrenda('${slot}',-1)">‹</button>`:''}
+    ${p.FotoURL?`<img src="${p.FotoURL}" onclick="verFotoGrande('${p.FotoURL}')">`:`<div style="font-size:32px">${CATEGORIA_ICONO[p.Categoria]||'👕'}</div>`}
+    <span class="maniqui-etiqueta">${escAttr(p.Tipo||p.Categoria)}</span>
+    ${flechas?`<button class="maniqui-arrow right" onclick="cambiarPrenda('${slot}',1)">›</button>`:''}
+  </div>`;
+}
+function cambiarPrenda(slot, delta){
+  const items = itemsParaSlot(slot);
+  if(!items.length) return;
+  const idxActual = items.findIndex(p=>p.ID===outfitBoard[slot]);
+  const idxNuevo = idxActual<0 ? 0 : (idxActual+delta+items.length)%items.length;
+  outfitBoard[slot] = items[idxNuevo].ID;
+  const cont = document.getElementById('capaOutfit_'+slot);
+  if(cont){
+    cont.outerHTML = renderCapaOutfit(slot);
+    const nuevo = document.getElementById('capaOutfit_'+slot);
+    if(nuevo) habilitarSwipeCapa(nuevo, slot);
+  }
+  actualizarResumenOutfit();
+}
+function habilitarSwipeCapa(el, slot){
+  let inicioX = null;
+  el.addEventListener('touchstart', e=>{ inicioX = e.touches[0].clientX; }, { passive:true });
+  el.addEventListener('touchend', e=>{
+    if(inicioX===null) return;
+    const dx = e.changedTouches[0].clientX - inicioX;
+    if(Math.abs(dx) > 40) cambiarPrenda(slot, dx<0 ? 1 : -1);
+    inicioX = null;
+  }, { passive:true });
 }
 function actualizarResumenOutfit(){
   const resumen = document.getElementById('resumenOutfit');
@@ -1485,44 +1546,6 @@ function actualizarResumenOutfit(){
   }).filter(Boolean);
   resumen.textContent = partes.length ? 'Outfit: '+partes.join(' + ') : '';
 }
-async function mostrarPrendaEnManiqui(){
-  const cat = outfitBoard.categoriaActiva;
-  const cont = document.getElementById('maniquiUnico');
-  if(!cont) return;
-  const items = itemsParaSlot(cat);
-  if(!items.length){ cont.innerHTML = '<div class="maniqui-slot-unico"><p class="hint">Todavía no tienes prendas aquí</p></div>'; return; }
-  if(!items.find(x=>x.ID===outfitBoard[cat])) outfitBoard[cat] = items[0].ID;
-  const p = items.find(x=>x.ID===outfitBoard[cat]);
-  const flechas = items.length>1;
-  cont.innerHTML = `<div class="maniqui-slot-unico">
-    ${flechas?`<button class="maniqui-arrow left" onclick="cambiarSlot(-1)">‹</button>`:''}
-    <p class="hint">Generando…</p>
-    ${flechas?`<button class="maniqui-arrow right" onclick="cambiarSlot(1)">›</button>`:''}
-  </div>`;
-  habilitarSwipeSlot(cont);
-  const url = await obtenerFotoManiqui(p, outfitBoard.genero);
-  // Si mientras se generaba el usuario ya cambió de categoría o de
-  // prenda, no pisar lo que esté viendo ahora con un resultado viejo.
-  if(outfitBoard.categoriaActiva!==cat || outfitBoard[cat]!==p.ID) return;
-  cont.innerHTML = `<div class="maniqui-slot-unico">
-    ${flechas?`<button class="maniqui-arrow left" onclick="cambiarSlot(-1)">‹</button>`:''}
-    ${url ? `<img src="${url}" onclick="verFotoGrande('${url}')">` : `<p class="hint">No se pudo generar</p>`}
-    <span class="maniqui-etiqueta">${escAttr(p.Tipo||p.Categoria)}</span>
-    ${flechas?`<button class="maniqui-arrow right" onclick="cambiarSlot(1)">›</button>`:''}
-  </div>`;
-  habilitarSwipeSlot(cont);
-  actualizarResumenOutfit();
-}
-function habilitarSwipeSlot(el){
-  let inicioX = null;
-  el.addEventListener('touchstart', e=>{ inicioX = e.touches[0].clientX; }, { passive:true });
-  el.addEventListener('touchend', e=>{
-    if(inicioX===null) return;
-    const dx = e.changedTouches[0].clientX - inicioX;
-    if(Math.abs(dx) > 40) cambiarSlot(dx<0 ? 1 : -1);
-    inicioX = null;
-  }, { passive:true });
-}
 async function usarTableroOutfitHoy(){
   const superiorActual = DATA.prendas.find(p=>p.ID===outfitBoard.superior);
   const esVestido = superiorActual && superiorActual.Categoria==='Vestidos';
@@ -1530,11 +1553,26 @@ async function usarTableroOutfitHoy(){
   if(!prendaIds.length){ showToast('Elige al menos una prenda'); return; }
   await usarOutfitHoy(prendaIds);
 }
+async function pedirFeedbackOutfit(){
+  const superiorActual = DATA.prendas.find(p=>p.ID===outfitBoard.superior);
+  const esVestido = superiorActual && superiorActual.Categoria==='Vestidos';
+  const ids = [outfitBoard.superior, esVestido?null:outfitBoard.inferior, outfitBoard.calzado, ...outfitBoard.extras].filter(Boolean);
+  if(!ids.length){ showToast('Elige al menos una prenda'); return; }
+  const prendas = ids.map(id=>findPrenda(id)).filter(Boolean)
+    .map(p=>({ categoria:p.Categoria, tipo:p.Tipo, color:p.Color, colorSecundario:p.ColorSecundario }));
+  const btn = document.getElementById('btnFeedbackOutfit');
+  const area = document.getElementById('feedbackOutfitArea');
+  if(btn){ btn.disabled = true; btn.textContent = 'Pensando…'; }
+  const evento = document.getElementById('sugEvento') ? document.getElementById('sugEvento').value : '';
+  const r = await apiPost('feedbackOutfit', { prendas, evento });
+  if(btn){ btn.disabled = false; btn.textContent = '💬 Feedback del outfit'; }
+  if(!area) return;
+  if(!r.ok){ area.innerHTML = `<p class="hint">No se pudo pedir feedback: ${r.error||'sin conexión'}</p>`; return; }
+  area.innerHTML = `<p class="hint" style="margin-top:8px">🤖 ${mensajeModelo(r,'Analizado')}</p><p style="margin-top:4px">${escAttr(r.texto)}</p>`;
+}
 // El maniquí base (genérico, sin ropa) se genera UNA vez por género y se
-// cachea en localStorage — regenerarlo en cada outfit sería lento y
-// costaría de más sin ninguna ganancia, ya que siempre es el mismo
-// maniquí "en blanco" que luego se viste. (v2: prompt con cara amigable
-// — clave nueva a propósito para no arrastrar el maniquí viejo cacheado.)
+// cachea en localStorage — se usa solo para las Ideas de abajo (cada
+// combinación sugerida se genera sobre este mismo maniquí en blanco).
 async function obtenerManiquiBase(genero){
   const cacheKey = 'ropa_maniqui_base_v2_'+genero;
   const cached = localStorage.getItem(cacheKey);
@@ -1551,51 +1589,6 @@ async function base64DeFotoURL(url){
   if(!fileId) return null;
   const r = await apiPost('descargarImagenDrive', { fileId });
   return r.ok ? { base64: r.base64, mimeType: r.mimeType } : null;
-}
-// La primera vez que se ve una prenda en el vestidor se genera puesta
-// sobre el maniquí y se guarda en FotoManiquiURL — las siguientes veces
-// solo se lee ese campo, instantáneo, sin volver a generar nada.
-async function obtenerFotoManiqui(p, genero){
-  if(p.FotoManiquiURL) return p.FotoManiquiURL;
-  if(!p.FotoURL) return null;
-  const maniqui = await obtenerManiquiBase(genero);
-  if(!maniqui) return null;
-  const prendaInfo = await base64DeFotoURL(p.FotoURL);
-  if(!prendaInfo) return null;
-  const r = await apiPost('generarOutfitEnManiqui', { maniquiBase64: maniqui.base64, maniquiMimeType: maniqui.mimeType, prendas: [{ base64: prendaInfo.base64, mimeType: prendaInfo.mimeType, categoria: p.Categoria }] });
-  if(!r.ok) return null;
-  const subida = await apiPost('uploadImage', { imageBase64: r.imageBase64, mimeType: r.mimeType||'image/jpeg', fileName:'maniqui-prenda-'+Date.now()+'.jpg' });
-  if(!subida.ok) return null;
-  p.FotoManiquiURL = subida.url;
-  await apiPost('saveRow', { table:'PRENDAS', row:p });
-  localStorage.setItem('ropa_data_cache', JSON.stringify(DATA));
-  return subida.url;
-}
-async function generarOutfitRealista(){
-  const superiorActual = DATA.prendas.find(p=>p.ID===outfitBoard.superior);
-  const esVestido = superiorActual && superiorActual.Categoria==='Vestidos';
-  const ids = [outfitBoard.superior, esVestido?null:outfitBoard.inferior, outfitBoard.calzado, ...outfitBoard.extras].filter(Boolean);
-  if(!ids.length){ showToast('Elige al menos una prenda'); return; }
-  const btn = document.getElementById('btnGenerarRealista');
-  const area = document.getElementById('outfitRealistaArea');
-  if(btn){ btn.disabled = true; btn.textContent = 'Preparando maniquí…'; }
-  const maniqui = await obtenerManiquiBase(outfitBoard.genero);
-  if(!maniqui){ showToast('No se pudo generar el maniquí'); if(btn){ btn.disabled=false; btn.textContent='🎨 Ver el outfit completo junto'; } return; }
-  if(btn) btn.textContent = 'Cargando prendas…';
-  const prendas = [];
-  for(const id of ids){
-    const p = findPrenda(id);
-    if(!p || !p.FotoURL) continue;
-    const info = await base64DeFotoURL(p.FotoURL);
-    if(info) prendas.push({ base64: info.base64, mimeType: info.mimeType, categoria: p.Categoria });
-  }
-  if(!prendas.length){ showToast('No se pudieron cargar las fotos de las prendas'); if(btn){ btn.disabled=false; btn.textContent='🎨 Ver el outfit completo junto'; } return; }
-  if(btn) btn.textContent = 'Vistiendo al maniquí…';
-  const r = await apiPost('generarOutfitEnManiqui', { maniquiBase64: maniqui.base64, maniquiMimeType: maniqui.mimeType, prendas });
-  if(btn){ btn.disabled=false; btn.textContent='🎨 Ver el outfit completo junto'; }
-  if(!r.ok){ showToast('No se pudo generar: '+(r.error||'sin conexión')); return; }
-  const subGen = await apiPost('uploadImage', { imageBase64: r.imageBase64, mimeType: r.mimeType||'image/jpeg', fileName:'outfit-'+Date.now()+'.jpg' });
-  if(subGen.ok && area) area.innerHTML = `<img src="${subGen.url}" onclick="verFotoGrande('${subGen.url}')" style="max-width:100%;border-radius:12px;margin-top:10px;cursor:zoom-in">`;
 }
 
 // ============================================================
@@ -1635,7 +1628,22 @@ function renderPerfilScreen(){
   document.getElementById('perfilSubtono').value = p.Subtono||'';
   document.getElementById('perfilCiudad').value = p.Ciudad||'';
   document.getElementById('perfilConexionInfo').innerHTML = `${DATA.prendas.length} prendas en tu catálogo` + (SHEET_URL ? ` · <a href="${SHEET_URL}" target="_blank" rel="noopener">ver mi hoja de datos</a>` : '');
+  const genero = localStorage.getItem('ropa_maniqui_genero')||'mujer';
+  document.getElementById('chipManiquiMujer').classList.toggle('active', genero==='mujer');
+  document.getElementById('chipManiquiHombre').classList.toggle('active', genero==='hombre');
   renderFotosSubidas();
+}
+// El género elegido aquí decide qué maniquí base se usa en todo el
+// Vestidor (Ideas y, si hace falta regenerarlo, el armador). Se deja
+// precacheado de una vez para que al entrar al Vestidor nunca haya que
+// esperar a que se genere el maniquí en blanco.
+async function elegirGeneroManiqui(genero){
+  localStorage.setItem('ropa_maniqui_genero', genero);
+  document.getElementById('chipManiquiMujer').classList.toggle('active', genero==='mujer');
+  document.getElementById('chipManiquiHombre').classList.toggle('active', genero==='hombre');
+  showToast('Preparando maniquí de '+genero+'…');
+  const ok = await obtenerManiquiBase(genero);
+  showToast(ok ? 'Maniquí de '+genero+' listo' : 'No se pudo preparar el maniquí, se generará después');
 }
 // Se lista desde DATA.fotos_origen (persistente) y NO derivado de las
 // prendas activas — si borras todas las prendas de una foto, la foto
