@@ -754,6 +754,29 @@ function cropDataUrl(sourceCanvas, width, height, caja){
 // que casi todo el lienzo vertical terminaba siendo relleno del color
 // clave (pctRemovido >90%, prendas minúsculas y mal escaladas).
 const MANIQUI_CANVAS = { w: 720, h: 1280 };
+// Anclas anatómicas fijas sobre el maniquí congelado — medidas por
+// código sobre el maniquí real (detectando dónde empieza/termina el
+// cuerpo dentro del lienzo y aplicando el canon clásico de proporciones
+// de figura de 8 cabezas), no inventadas a ojo. % del LIENZO completo,
+// no del cuerpo. No dependen de que la IA replique la pose — son fijas
+// porque el maniquí siempre es el mismo (una vez generado, se cachea).
+const ANCLAS_MANIQUI = { hombros:20.0, pecho:28.9, cintura:40.0, cadera:45.8, rodillas:73.4, tobillos:90.4, pies:93.0 };
+// Por categoría: ancho objetivo (% del lienzo) y a qué ancla se alinea
+// el borde superior (o inferior, para calzado) de la prenda. La altura
+// nunca se fuerza — se preserva la proporción real de cada prenda
+// (recorte apaisado o largo cae donde le corresponda según su propio
+// bbox), solo se ancla un punto y se escala por el ancho.
+const REGLAS_ANCLA = {
+  'Ropa superior': { ancho:46, vAlign:'top',    anclaY:'hombros' },
+  'Vestidos':      { ancho:46, vAlign:'top',    anclaY:'hombros' },
+  'Abrigos':       { ancho:54, vAlign:'top',    anclaY:'hombros' },
+  'Ropa inferior': { ancho:38, vAlign:'top',    anclaY:'cintura' },
+  'Calzado':       { ancho:30, vAlign:'bottom', anclaY:'pies' },
+  'Accesorios':    { ancho:20, vAlign:'top',    anclaY:'pecho' },
+  'Bolsos':        { ancho:28, vAlign:'top',    anclaY:'cadera' },
+  'Ropa interior': { ancho:40, vAlign:'top',    anclaY:'cintura' },
+  'Deportiva':     { ancho:46, vAlign:'top',    anclaY:'hombros' }
+};
 const CLAVE_CANDIDATOS = [
   { nombre:'verde chroma-key',   hex:'#00FF00', hue:120 },
   { nombre:'magenta chroma-key', hex:'#FF00FF', hue:300 },
@@ -914,6 +937,77 @@ function capaEsValida(recorte){
   if(areaPrenda<0.02) return false; // la prenda quedó casi invisible
   return true;
 }
+function escanearBboxAlfa(ctx, W, H){
+  const d = ctx.getImageData(0,0,W,H).data;
+  let minX=W,minY=H,maxX=0,maxY=0;
+  for(let i=0;i<d.length;i+=4){
+    if(d[i+3]>10){
+      const px=(i/4)%W, py=Math.floor((i/4)/W);
+      if(px<minX)minX=px; if(px>maxX)maxX=px; if(py<minY)minY=py; if(py>maxY)maxY=py;
+    }
+  }
+  return (maxX>=minX&&maxY>=minY) ? { x:(minX/W)*100, y:(minY/H)*100, w:Math.max(1,((maxX-minX)/W)*100), h:Math.max(1,((maxY-minY)/H)*100) } : {x:0,y:0,w:100,h:100};
+}
+// Enfoque híbrido determinista, pedido explícito: la posición final la
+// decide el código con anclas fijas, no la IA. Reescala y traslada TODO
+// el lienzo canónico (no solo el recorte de la prenda) según su propio
+// bbox real, hasta que quede alineada a la ancla que le toca por
+// categoría — el resultado es un nuevo PNG 720x1280 ya corregido, que es
+// justamente lo que se guarda como FotoGeneradaURL. Así el Vestidor
+// nunca tiene que calcular nada en tiempo real, solo superponer capas.
+function reposicionarCapa(dataUrl, bboxPct, categoria){
+  return new Promise(resolve=>{
+    const img = new Image();
+    img.onload = ()=>{
+      const regla = REGLAS_ANCLA[categoria] || REGLAS_ANCLA['Ropa superior'];
+      const W = MANIQUI_CANVAS.w, H = MANIQUI_CANVAS.h;
+      const bboxMinX = bboxPct.x/100*W, bboxMinY = bboxPct.y/100*H;
+      const bboxW = Math.max(1, bboxPct.w/100*W), bboxH = Math.max(1, bboxPct.h/100*H);
+      const bboxMaxY = bboxMinY + bboxH;
+      const scale = ((regla.ancho/100)*W) / bboxW;
+      const anclaYpx = (ANCLAS_MANIQUI[regla.anclaY]/100)*H;
+      const translateX = W*0.5 - (bboxMinX + bboxW/2)*scale;
+      const translateY = regla.vAlign==='bottom' ? (anclaYpx - bboxMaxY*scale) : (anclaYpx - bboxMinY*scale);
+      const canvas = document.createElement('canvas');
+      canvas.width = W; canvas.height = H;
+      const ctx = canvas.getContext('2d');
+      ctx.setTransform(scale,0,0,scale,translateX,translateY);
+      ctx.drawImage(img, 0, 0);
+      ctx.setTransform(1,0,0,1,0,0);
+      const bboxNuevo = escanearBboxAlfa(ctx, W, H);
+      const outUrl = canvas.toDataURL('image/png');
+      resolve({ dataUrl: outUrl, base64: outUrl.split(',')[1], bboxPct: bboxNuevo });
+    };
+    img.onerror = ()=> resolve(null);
+    img.src = dataUrl;
+  });
+}
+// Ajuste manual ("✋ Ajustar en maniquí", ver Editar prenda): parte de la
+// capa YA canónica (720x1280, ya sea la puesta automáticamente por
+// reposicionarCapa o una versión ajustada antes) y aplica un desplazamiento
+// (dx,dy en % del lienzo) + escala adicional, centrada en el lienzo —
+// produce, igual que reposicionarCapa, un nuevo PNG 720x1280 final.
+function aplicarAjusteManual(dataUrl, ajuste){
+  return new Promise(resolve=>{
+    const img = new Image();
+    img.onload = ()=>{
+      const W = MANIQUI_CANVAS.w, H = MANIQUI_CANVAS.h;
+      const s = ajuste.scale||1;
+      const dxPx = (ajuste.dx||0)/100*W, dyPx = (ajuste.dy||0)/100*H;
+      const canvas = document.createElement('canvas');
+      canvas.width = W; canvas.height = H;
+      const ctx = canvas.getContext('2d');
+      ctx.setTransform(s,0,0,s, W/2*(1-s)+dxPx, H/2*(1-s)+dyPx);
+      ctx.drawImage(img, 0, 0);
+      ctx.setTransform(1,0,0,1,0,0);
+      const bboxNuevo = escanearBboxAlfa(ctx, W, H);
+      const outUrl = canvas.toDataURL('image/png');
+      resolve({ dataUrl: outUrl, base64: outUrl.split(',')[1], bboxPct: bboxNuevo });
+    };
+    img.onerror = ()=> resolve(null);
+    img.src = dataUrl;
+  });
+}
 async function crearFilaPrenda(it, origenUrl){
   let fotoRealUrl = '';
   if(it.caja && it.cropPreview){
@@ -939,10 +1033,17 @@ async function crearFilaPrenda(it, origenUrl){
         // lado — probado en pruebas reales), mejor guardar sin capa que
         // subir algo roto.
         if(capaEsValida(recorte)){
-          const subGen = await apiPost('uploadImage', { imageBase64: recorte.base64, mimeType:'image/png', fileName:'capa-'+Date.now()+'.png' });
+          // Enfoque híbrido determinista: la posición final la decide el
+          // código con anclas fijas (reposicionarCapa), no la referencia
+          // visual del maniquí que le mandamos a la IA — esa referencia
+          // ayuda a que la prenda salga con la forma/escala correcta,
+          // pero no garantiza la posición exacta, así que se corrige acá.
+          const reposicionada = await reposicionarCapa(recorte.dataUrl, recorte.bboxPct, it.categoria);
+          const final = reposicionada || recorte;
+          const subGen = await apiPost('uploadImage', { imageBase64: final.base64, mimeType:'image/png', fileName:'capa-'+Date.now()+'.png' });
           if(subGen.ok){
             fotoGeneradaUrl = subGen.url;
-            bboxJson = JSON.stringify(recorte.bboxPct);
+            bboxJson = JSON.stringify(final.bboxPct);
             claveColor = clave.nombre+' '+clave.hex;
           }
         }
@@ -1431,6 +1532,7 @@ function botonesFotoHtml(p){
   return (p.FotoGeneradaURL && p.FotoURL!==p.FotoGeneradaURL ? `<button class="btn ghost" id="edUsarGenerada" style="font-size:12px;padding:6px 10px">🖼️ Usar generada</button>` : '') +
     (p.FotoRealURL && p.FotoURL!==p.FotoRealURL ? `<button class="btn ghost" id="edUsarReal" style="font-size:12px;padding:6px 10px">📸 Usar foto real</button>` : '') +
     `<button class="btn ghost" id="edRegenerar" style="font-size:12px;padding:6px 10px">🔄 Regenerar</button>` +
+    (p.FotoGeneradaURL ? `<button class="btn ghost" id="edAjustarManiqui" style="font-size:12px;padding:6px 10px">✋ Ajustar en maniquí</button>` : '') +
     `<button class="btn ghost" id="edRecortar" style="font-size:12px;padding:6px 10px">✂️ Recortar</button>` +
     `<button class="btn ghost" id="edSubirTienda" style="font-size:12px;padding:6px 10px">📤 Subir foto de tienda</button>`;
 }
@@ -1451,6 +1553,8 @@ function cablearBotonesFoto(p){
   };
   const btnRegen = document.getElementById('edRegenerar');
   if(btnRegen) btnRegen.onclick = ()=> regenerarFotoPrenda(p);
+  const btnAjustar = document.getElementById('edAjustarManiqui');
+  if(btnAjustar) btnAjustar.onclick = ()=> abrirAjustarManiqui(p);
   const btnRecortar = document.getElementById('edRecortar');
   if(btnRecortar) btnRecortar.onclick = async ()=>{
     const fileId = fileIdDeUrlDrive(p.FotoRealURL) || fileIdDeUrlDrive(p.FotoOrigenURL) || fileIdDeUrlDrive(p.FotoURL);
@@ -1508,11 +1612,13 @@ async function regenerarCapaDesdeImagen(p, dataUrl, feedback, btn, textoBtnNorma
     if(btn){ btn.disabled=false; btn.textContent=textoBtnNormal; }
     return false;
   }
-  const subGen = await apiPost('uploadImage', { imageBase64: recorte.base64, mimeType:'image/png', fileName:'capa-'+Date.now()+'.png' });
+  const reposicionada = await reposicionarCapa(recorte.dataUrl, recorte.bboxPct, p.Categoria);
+  const final = reposicionada || recorte;
+  const subGen = await apiPost('uploadImage', { imageBase64: final.base64, mimeType:'image/png', fileName:'capa-'+Date.now()+'.png' });
   if(!subGen.ok){ showToast('No se pudo guardar la imagen generada'); if(btn){ btn.disabled=false; btn.textContent=textoBtnNormal; } return false; }
   p.FotoGeneradaURL = subGen.url;
   p.FotoURL = subGen.url;
-  p.BBoxJSON = JSON.stringify(recorte.bboxPct);
+  p.BBoxJSON = JSON.stringify(final.bboxPct);
   p.ClaveColor = clave.nombre+' '+clave.hex;
   await apiPost('saveRow', { table:'PRENDAS', row:p });
   localStorage.setItem('ropa_data_cache', JSON.stringify(DATA));
@@ -1521,6 +1627,101 @@ async function regenerarCapaDesdeImagen(p, dataUrl, feedback, btn, textoBtnNorma
   if(btn){ btn.disabled=false; btn.textContent=textoBtnNormal; }
   showToast('Foto regenerada');
   return true;
+}
+// "✋ Ajustar en maniquí" — corrección fina manual sobre lo que puso el
+// sistema de anclas automático (ver reposicionarCapa). Arrastrar/escalar
+// es puro CSS (instantáneo, sin tocar el archivo); solo al guardar se
+// aplica el mismo ajuste sobre la capa real (aplicarAjusteManual) y se
+// sube un PNG 720x1280 nuevo — el ajuste queda guardado en esa prenda,
+// no hay que repetirlo cada vez que se arma un outfit.
+let ajusteManiqui = null;
+async function abrirAjustarManiqui(p){
+  if(!p.FotoGeneradaURL){ showToast('Esta prenda todavía no tiene una capa para ajustar'); return; }
+  const genero = localStorage.getItem('ropa_maniqui_genero')||'mujer';
+  ajusteManiqui = { p, dx:0, dy:0, scale:1 };
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay';
+  overlay.id = 'ajustarManiquiOverlay';
+  overlay.innerHTML = `<div class="modal">
+    <h3>Ajustar en el maniquí</h3>
+    <p class="hint">Arrastra la prenda para moverla; usa los botones para agrandarla o achicarla.</p>
+    <div class="maniqui-doll-wrap" id="ajustarWrap" style="max-width:240px"><p class="hint" style="padding:60px 0;text-align:center">Cargando…</p></div>
+    <div class="chips" style="justify-content:center;margin-top:10px">
+      <button class="chip" onclick="ajustarManiquiEscala(-0.05)">➖ Más chica</button>
+      <button class="chip" onclick="ajustarManiquiEscala(0.05)">➕ Más grande</button>
+      <button class="chip" onclick="ajustarManiquiReset()">↺ Reiniciar</button>
+    </div>
+    <div class="actions">
+      <button class="btn ghost" id="ajustarCancelar">Cancelar</button>
+      <button class="btn" id="ajustarGuardar">💾 Guardar ajuste</button>
+    </div>
+  </div>`;
+  document.body.appendChild(overlay);
+  overlay.addEventListener('click', e=>{ if(e.target===overlay){ overlay.remove(); ajusteManiqui=null; } });
+  overlay.querySelector('#ajustarCancelar').onclick = ()=>{ overlay.remove(); ajusteManiqui=null; };
+  overlay.querySelector('#ajustarGuardar').onclick = guardarAjusteManiqui;
+  const maniqui = await obtenerManiquiBase(genero);
+  const wrap = document.getElementById('ajustarWrap');
+  if(!wrap) return; // el usuario ya cerró el modal mientras cargaba
+  if(!maniqui || !maniqui.url){ wrap.innerHTML = '<p class="hint">No se pudo cargar el maniquí.</p>'; return; }
+  wrap.innerHTML = `<img class="maniqui-doll-base" src="${maniqui.url}">
+    <img class="maniqui-doll-capa-full" id="ajustarImg" src="${p.FotoGeneradaURL}" style="cursor:grab;touch-action:none">`;
+  aplicarTransformAjuste();
+  const img = document.getElementById('ajustarImg');
+  let inicio = null;
+  img.addEventListener('pointerdown', e=>{
+    inicio = { x:e.clientX, y:e.clientY, dx:ajusteManiqui.dx, dy:ajusteManiqui.dy };
+    img.setPointerCapture(e.pointerId);
+    img.style.cursor = 'grabbing';
+  });
+  img.addEventListener('pointermove', e=>{
+    if(!inicio || !ajusteManiqui) return;
+    const rect = wrap.getBoundingClientRect();
+    ajusteManiqui.dx = inicio.dx + (e.clientX-inicio.x)/rect.width*100;
+    ajusteManiqui.dy = inicio.dy + (e.clientY-inicio.y)/rect.height*100;
+    aplicarTransformAjuste();
+  });
+  img.addEventListener('pointerup', ()=>{ inicio=null; if(img) img.style.cursor='grab'; });
+}
+function aplicarTransformAjuste(){
+  const img = document.getElementById('ajustarImg');
+  if(!img || !ajusteManiqui) return;
+  img.style.transform = `translate(${ajusteManiqui.dx}%, ${ajusteManiqui.dy}%) scale(${ajusteManiqui.scale})`;
+}
+function ajustarManiquiEscala(delta){
+  if(!ajusteManiqui) return;
+  ajusteManiqui.scale = Math.max(0.3, Math.min(3, ajusteManiqui.scale+delta));
+  aplicarTransformAjuste();
+}
+function ajustarManiquiReset(){
+  if(!ajusteManiqui) return;
+  ajusteManiqui.dx=0; ajusteManiqui.dy=0; ajusteManiqui.scale=1;
+  aplicarTransformAjuste();
+}
+async function guardarAjusteManiqui(){
+  if(!ajusteManiqui) return;
+  const { p, dx, dy, scale } = ajusteManiqui;
+  const btn = document.getElementById('ajustarGuardar');
+  if(btn){ btn.disabled=true; btn.textContent='Guardando…'; }
+  const fileId = fileIdDeUrlDrive(p.FotoGeneradaURL);
+  if(!fileId){ showToast('No se pudo identificar la capa actual'); if(btn){btn.disabled=false;btn.textContent='💾 Guardar ajuste';} return; }
+  const r = await apiPost('descargarImagenDrive', { fileId });
+  if(!r.ok){ showToast('No se pudo cargar la capa: '+(r.error||'sin conexión')); if(btn){btn.disabled=false;btn.textContent='💾 Guardar ajuste';} return; }
+  const resultado = await aplicarAjusteManual('data:'+r.mimeType+';base64,'+r.base64, { dx, dy, scale });
+  if(!resultado){ showToast('No se pudo aplicar el ajuste'); if(btn){btn.disabled=false;btn.textContent='💾 Guardar ajuste';} return; }
+  const subida = await apiPost('uploadImage', { imageBase64: resultado.base64, mimeType:'image/png', fileName:'capa-ajustada-'+Date.now()+'.png' });
+  if(!subida.ok){ showToast('No se pudo guardar la imagen ajustada'); if(btn){btn.disabled=false;btn.textContent='💾 Guardar ajuste';} return; }
+  p.FotoGeneradaURL = subida.url;
+  p.FotoURL = subida.url;
+  p.BBoxJSON = JSON.stringify(resultado.bboxPct);
+  await apiPost('saveRow', { table:'PRENDAS', row:p });
+  localStorage.setItem('ropa_data_cache', JSON.stringify(DATA));
+  renderCatalogo();
+  refrescarFotoModal(p);
+  const overlay = document.getElementById('ajustarManiquiOverlay');
+  if(overlay) overlay.remove();
+  ajusteManiqui = null;
+  showToast('Ajuste guardado');
 }
 function fileIdDeUrlDrive(url){
   const m = String(url||'').match(/[?&]id=([^&]+)/);
