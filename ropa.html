@@ -237,16 +237,16 @@ nav.tabbar button .ic{font-size:19px}
     </section>
 
     <section class="screen" id="screen-olvidados">
-      <h2>Llevo mucho sin usar</h2>
-      <div class="field"><label class="hint">Mostrar prendas sin usar hace más de…</label>
-        <select id="olvidadosDias" onchange="renderOlvidados()">
-          <option value="30">30 días</option>
-          <option value="60" selected>60 días</option>
-          <option value="90">90 días</option>
-          <option value="180">6 meses</option>
-        </select>
+      <h2>Calendario</h2>
+      <p class="hint">Tus outfits completos, del más nuevo al más viejo.</p>
+      <div class="chips" id="calFiltroChips">
+        <button class="chip" data-filtro="semana" onclick="calendarioFiltrar('semana')">Esta semana</button>
+        <button class="chip" data-filtro="mes" onclick="calendarioFiltrar('mes')">Este mes</button>
+        <button class="chip" data-filtro="anio" onclick="calendarioFiltrar('anio')">Este año</button>
+        <button class="chip active" data-filtro="todo" onclick="calendarioFiltrar('todo')">Todo</button>
       </div>
-      <div class="grid" id="olvidadosGrid"></div>
+      <button class="btn secondary" style="margin-top:10px" onclick="abrirOlvidados()">⏳ Olvidado (sin usar hace tiempo)</button>
+      <div id="calendarioLista" style="margin-top:14px"></div>
     </section>
 
     <section class="screen" id="screen-perfil">
@@ -306,7 +306,7 @@ nav.tabbar button .ic{font-size:19px}
     <button data-tab="catalogo" onclick="switchTab('catalogo')"><span class="ic">🗂️</span>Catálogo</button>
     <button data-tab="hoy" onclick="switchTab('hoy')"><span class="ic">✅</span>Hoy</button>
     <button data-tab="sugerencias" onclick="switchTab('sugerencias')"><span class="ic">👗</span>Vestidor</button>
-    <button data-tab="olvidados" onclick="switchTab('olvidados')"><span class="ic">⏳</span>Olvidados</button>
+    <button data-tab="olvidados" onclick="switchTab('olvidados')"><span class="ic">📅</span>Calendario</button>
     <button data-tab="perfil" onclick="switchTab('perfil')"><span class="ic">⚙️</span>Perfil</button>
   </nav>
 </div>
@@ -322,7 +322,7 @@ let SHEET_URL = '';
 // Nombre-landmark de esta versión — cámbialo en cada cambio que se
 // despliegue, así se puede saber a simple vista (en Perfil) si el
 // celular ya está viendo lo último o una copia vieja en caché.
-const BUILD_VERSION = 'Nogales';
+const BUILD_VERSION = 'Oaxaca2';
 let DATA = { prendas: [], usos: [], outfits_sugeridos: [], perfil: [], fotos_origen: [] };
 let showTrash = false;
 let soloFavoritos = false;
@@ -432,7 +432,7 @@ async function backfillFotosOrigen(){
   }
 }
 function renderAllScreens(){
-  renderCatalogo(); renderHoy(); renderOlvidados(); renderPerfilScreen();
+  renderCatalogo(); renderHoy(); renderCalendario(); renderPerfilScreen();
 }
 
 function switchTab(name){
@@ -442,7 +442,7 @@ function switchTab(name){
   if(name==='catalogo') renderCatalogo();
   if(name==='hoy') renderHoy();
   if(name==='sugerencias') abrirVestidor();
-  if(name==='olvidados') renderOlvidados();
+  if(name==='olvidados') renderCalendario();
   if(name==='perfil') renderPerfilScreen();
 }
 
@@ -1948,7 +1948,9 @@ async function abrirBorrador(p){
       <button class="chip" id="modoOvalo">⭕ Óvalo</button>
       <button class="chip" id="modoRect">▭ Rectángulo</button>
       <button class="chip" id="modoVarita">🪄 Varita (clic y selecciona)</button>
+      <button class="chip" id="modoClonar">🧵 Clonar (traer tela)</button>
     </div>
+    <p class="hint" style="text-align:center;margin-top:4px" id="clonEstado"></p>
     <div style="max-width:280px;max-height:55vh;overflow:auto;margin:10px auto 0;border-radius:10px;border:1px solid var(--border)">
       <div class="maniqui-doll-wrap" id="borradorWrap" style="max-width:none;margin:0">
         <img class="maniqui-doll-base" src="${maniqui&&maniqui.url?maniqui.url:''}">
@@ -1962,6 +1964,7 @@ async function abrirBorrador(p){
     <div class="chips" style="justify-content:center;margin-top:6px">
       <button class="chip" id="borradorDeshacer">↩ Deshacer trazo</button>
       <button class="chip" id="borradorReiniciar">↺ Reiniciar todo</button>
+      <button class="chip" id="borradorNuevaFuente" style="display:none">🎯 Elegir otra fuente</button>
     </div>
     <div class="actions">
       <button class="btn ghost" id="borradorCancelar">Cancelar</button>
@@ -1988,20 +1991,27 @@ async function abrirBorrador(p){
     if(historial.length>25) historial.shift();
   };
   let modo = 'libre', grosor = 12, activo = false, inicio = null, ultimo = null;
+  let fuenteClon = null, fuenteSnap = null, clonInicio = null;
   document.getElementById('borradorZoom').oninput = e=>{ wrap.style.width = (280*Number(e.target.value)/100)+'px'; };
   document.getElementById('borradorGrosor').oninput = e=> grosor = Number(e.target.value);
-  const botonesModo = { libre: document.getElementById('modoLibre'), ovalo: document.getElementById('modoOvalo'), rectangulo: document.getElementById('modoRect'), varita: document.getElementById('modoVarita') };
+  const botonesModo = { libre: document.getElementById('modoLibre'), ovalo: document.getElementById('modoOvalo'), rectangulo: document.getElementById('modoRect'), varita: document.getElementById('modoVarita'), clonar: document.getElementById('modoClonar') };
   const grosorLabel = document.getElementById('borradorGrosorLabel'), grosorInput = document.getElementById('borradorGrosor');
+  const clonEstado = document.getElementById('clonEstado'), btnNuevaFuente = document.getElementById('borradorNuevaFuente');
   function elegirModo(m){
     modo = m;
     Object.entries(botonesModo).forEach(([k,b])=> b.classList.toggle('active', k===m));
     grosorLabel.style.display = m==='varita' ? 'none' : '';
     grosorInput.style.display = m==='varita' ? 'none' : '';
+    fuenteClon = null; fuenteSnap = null;
+    btnNuevaFuente.style.display = m==='clonar' ? '' : 'none';
+    clonEstado.textContent = m==='clonar' ? 'Toca la parte de tela buena que quieres copiar' : '';
   }
   botonesModo.libre.onclick = ()=> elegirModo('libre');
   botonesModo.ovalo.onclick = ()=> elegirModo('ovalo');
   botonesModo.rectangulo.onclick = ()=> elegirModo('rectangulo');
   botonesModo.varita.onclick = ()=> elegirModo('varita');
+  botonesModo.clonar.onclick = ()=> elegirModo('clonar');
+  btnNuevaFuente.onclick = ()=>{ fuenteClon = null; fuenteSnap = null; clonEstado.textContent = 'Toca la parte de tela buena que quieres copiar'; };
   const escala = ()=> canvas.width / canvas.getBoundingClientRect().width;
   const posEnCanvas = e=>{
     const rect = canvas.getBoundingClientRect();
@@ -2015,6 +2025,24 @@ async function abrirBorrador(p){
     const dist = Math.hypot(b.x-a.x, b.y-a.y);
     const pasos = Math.max(1, Math.ceil(dist / Math.max(2, radio*0.5)));
     for(let i=0;i<=pasos;i++){ const t=i/pasos; borrarCirculo(c, { x:a.x+(b.x-a.x)*t, y:a.y+(b.y-a.y)*t }, radio); }
+  };
+  // "Clonar": copia píxeles reales (color Y textura, no un color plano)
+  // desde donde se eligió la fuente hacia donde se arrastra — pedido
+  // explícito: "traer un poquito más de tela" cuando falta un pedacito
+  // (ej. la manga quedó un poco corta), sin perder el patrón/estampado.
+  const clonarCirculo = (pos, radio)=>{
+    if(!fuenteSnap || !clonInicio) return;
+    const off = { x: pos.x-clonInicio.x, y: pos.y-clonInicio.y };
+    const src = { x: fuenteClon.x+off.x, y: fuenteClon.y+off.y };
+    bctx.save();
+    bctx.beginPath(); bctx.arc(pos.x, pos.y, radio, 0, Math.PI*2); bctx.clip();
+    bctx.drawImage(fuenteSnap, src.x-radio, src.y-radio, radio*2, radio*2, pos.x-radio, pos.y-radio, radio*2, radio*2);
+    bctx.restore();
+  };
+  const clonarLinea = (a, b, radio)=>{
+    const dist = Math.hypot(b.x-a.x, b.y-a.y);
+    const pasos = Math.max(1, Math.ceil(dist / Math.max(2, radio*0.5)));
+    for(let i=0;i<=pasos;i++){ const t=i/pasos; clonarCirculo({ x:a.x+(b.x-a.x)*t, y:a.y+(b.y-a.y)*t }, radio); }
   };
   const dibujarFigura = (c, esVistaPrevia)=>{
     c.save();
@@ -2064,10 +2092,19 @@ async function abrirBorrador(p){
       ctx.clearRect(0,0,canvas.width,canvas.height); ctx.drawImage(buffer,0,0);
       return;
     }
+    if(modo==='clonar' && !fuenteClon){
+      fuenteClon = pos;
+      fuenteSnap = document.createElement('canvas');
+      fuenteSnap.width = buffer.width; fuenteSnap.height = buffer.height;
+      fuenteSnap.getContext('2d').drawImage(buffer, 0, 0);
+      clonEstado.textContent = 'Listo — ahora arrastra donde falta tela';
+      return;
+    }
     activo = true; canvas.setPointerCapture(e.pointerId);
     inicio = pos; ultimo = pos;
     guardarHistorial();
     if(modo==='libre') borrarCirculo(bctx, inicio, grosor*escala());
+    if(modo==='clonar'){ clonInicio = pos; clonarCirculo(pos, grosor*escala()); }
     ctx.clearRect(0,0,canvas.width,canvas.height); ctx.drawImage(buffer,0,0);
   });
   canvas.addEventListener('pointermove', e=>{
@@ -2079,6 +2116,10 @@ async function abrirBorrador(p){
       dibujarFigura(ctx, true);
     } else if(modo==='libre'){
       borrarLinea(bctx, ultimo, pos, grosor*escala());
+      ultimo = pos;
+      ctx.clearRect(0,0,canvas.width,canvas.height); ctx.drawImage(buffer,0,0);
+    } else if(modo==='clonar'){
+      clonarLinea(ultimo, pos, grosor*escala());
       ultimo = pos;
       ctx.clearRect(0,0,canvas.width,canvas.height); ctx.drawImage(buffer,0,0);
     }
@@ -2787,8 +2828,78 @@ async function base64DeFotoURL(url){
 }
 
 // ============================================================
-//  Olvidados
+//  Calendario (outfits completos, más nuevo primero) + Olvidados
 // ============================================================
+// Cada fila de USOS ya ES una combinación completa (PrendaIDsJSON trae
+// todo lo que se usó ese día junto) — no hace falta agrupar nada, solo
+// ordenar y filtrar por fecha.
+let calendarioFiltro = 'todo';
+function calendarioFiltrar(f){
+  calendarioFiltro = f;
+  document.querySelectorAll('#calFiltroChips .chip').forEach(b=> b.classList.toggle('active', b.dataset.filtro===f));
+  renderCalendario();
+}
+function dentroDelFiltroCalendario(fechaISO){
+  if(calendarioFiltro==='todo') return true;
+  if(!fechaISO) return false;
+  const d = new Date(fechaISO);
+  if(isNaN(d.getTime())) return false;
+  const ahora = new Date();
+  if(calendarioFiltro==='semana'){
+    const dias = (ahora - d) / 86400000;
+    return dias>=0 && dias<=7;
+  }
+  if(calendarioFiltro==='mes') return d.getFullYear()===ahora.getFullYear() && d.getMonth()===ahora.getMonth();
+  if(calendarioFiltro==='anio') return d.getFullYear()===ahora.getFullYear();
+  return true;
+}
+function renderCalendario(){
+  const cont = document.getElementById('calendarioLista');
+  if(!cont) return;
+  const eventos = DATA.usos.filter(u=>u.Fecha && dentroDelFiltroCalendario(u.Fecha))
+    .slice()
+    .sort((a,b)=> new Date(b.Fecha).getTime() - new Date(a.Fecha).getTime());
+  if(!eventos.length){ cont.innerHTML = '<p class="hint">No hay outfits registrados en este período.</p>'; return; }
+  cont.innerHTML = eventos.map(u=>{
+    let ids = []; try{ ids = JSON.parse(u.PrendaIDsJSON||'[]'); }catch(e){}
+    const prendas = ids.map(id=>findPrenda(id)).filter(Boolean);
+    const fotoDia = u.FotoURL ? `<img src="${u.FotoURL}" onclick="verFotoGrande('${u.FotoURL}')" style="width:100%;max-height:180px;object-fit:cover;border-radius:var(--radius) var(--radius) 0 0;cursor:zoom-in">` : '';
+    const meta = [u.Evento, u.ClimaTexto].filter(Boolean).join(' · ');
+    return `<div class="card" style="margin-bottom:12px">
+      ${fotoDia}
+      <div class="body">
+        <div class="tipo">${formatoFechaUso(u.Fecha)}</div>
+        ${meta?`<div class="meta">${escAttr(meta)}</div>`:''}
+        <div class="pick-list" style="margin-top:8px;flex-wrap:wrap">${prendas.length?prendas.map(p=>`<div class="pick-item" onclick="abrirVerPrenda('${p.ID}')">${fotoRecortadaHtml(p,{estilo:'width:56px',clickable:false,iconoTam:20})}<div>${escAttr(p.Tipo||p.Categoria)}</div></div>`).join(''):'<p class="hint">Esas prendas ya no están en tu catálogo.</p>'}</div>
+      </div>
+    </div>`;
+  }).join('');
+}
+// El detalle de "sin usar hace tiempo" (antes su propia pestaña) ahora
+// vive en un modal aparte, aparte del Calendario — se pidió que el
+// Calendario muestre la historia de outfits, con esto como algo que se
+// abre a propósito, no la vista principal.
+function abrirOlvidados(){
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay';
+  overlay.innerHTML = `<div class="modal">
+    <h3>Llevo mucho sin usar</h3>
+    <div class="field"><label class="hint">Mostrar prendas sin usar hace más de…</label>
+      <select id="olvidadosDias" onchange="renderOlvidados()">
+        <option value="30">30 días</option>
+        <option value="60" selected>60 días</option>
+        <option value="90">90 días</option>
+        <option value="180">6 meses</option>
+      </select>
+    </div>
+    <div class="grid" id="olvidadosGrid"></div>
+    <div class="actions"><button class="btn ghost" id="olvidadosCerrar">Cerrar</button></div>
+  </div>`;
+  document.body.appendChild(overlay);
+  overlay.addEventListener('click', e=>{ if(e.target===overlay) overlay.remove(); });
+  overlay.querySelector('#olvidadosCerrar').onclick = ()=> overlay.remove();
+  renderOlvidados();
+}
 function renderOlvidados(){
   const umbral = Number(document.getElementById('olvidadosDias').value);
   const activos = DATA.prendas.filter(p=>!esVerdadero(p.Papelera));
