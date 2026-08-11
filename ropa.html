@@ -114,7 +114,7 @@ nav.tabbar button .ic{font-size:19px}
    position:absolute;inset:0 en el orden que decida el usuario — sin
    posiciones por categoría adivinadas ni generar nada nuevo al
    agregar/quitar/reordenar una prenda. */
-.maniqui-doll-wrap{position:relative;max-width:280px;aspect-ratio:640/1024;margin:10px auto 0;background:var(--bg-card);border-radius:var(--radius);box-shadow:var(--shadow);overflow:hidden}
+.maniqui-doll-wrap{position:relative;max-width:280px;aspect-ratio:9/16;margin:10px auto 0;background:var(--bg-card);border-radius:var(--radius);box-shadow:var(--shadow);overflow:hidden}
 .maniqui-doll-base{position:absolute;inset:0;width:100%;height:100%;object-fit:contain;z-index:0}
 .maniqui-doll-capa-full{position:absolute;inset:0;width:100%;height:100%;object-fit:contain;cursor:zoom-in}
 .capa-row{display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid var(--border)}
@@ -745,7 +745,15 @@ function cropDataUrl(sourceCanvas, width, height, caja){
 // el navegador lo quita por código (quitarFondoColor). El color clave se
 // elige dinámicamente (elegirColorClave) según los colores reales de la
 // prenda para que nunca coincida con ellos.
-const MANIQUI_CANVAS = { w: 640, h: 1024 };
+// 720x1280 = exactamente 9:16 — tiene que calzar con el imageConfig.
+// aspectRatio:'9:16' que ahora piden generarCapaPrenda/generarManiquiBase/
+// generarOutfitEnManiqui en el backend. Antes (640x1024, 5:8) no calzaba
+// con nada que la IA realmente devolviera — probado que sin pedir
+// aspectRatio explícito, Gemini ignora el encuadre pedido por texto y
+// regresa su relación de aspecto por defecto (más ancha que alta), así
+// que casi todo el lienzo vertical terminaba siendo relleno del color
+// clave (pctRemovido >90%, prendas minúsculas y mal escaladas).
+const MANIQUI_CANVAS = { w: 720, h: 1280 };
 const CLAVE_CANDIDATOS = [
   { nombre:'verde chroma-key',   hex:'#00FF00', hue:120 },
   { nombre:'magenta chroma-key', hex:'#FF00FF', hue:300 },
@@ -830,7 +838,12 @@ function quitarFondoColor(dataUrl, claveHex, tolerancia){
       const imgData = ctx.getImageData(0,0,canvas.width,canvas.height);
       const d = imgData.data;
       const tol2 = tolerancia*tolerancia;
-      let minX=canvas.width, minY=canvas.height, maxX=0, maxY=0, removidos=0;
+      // Umbral más amplio (no para quitar, solo para DETECTAR fondo que se
+      // quedó sin quitar): un pixel totalmente opaco que sigue bastante
+      // cerca del color clave es una señal de que el recorte falló ahí,
+      // aunque no haya entrado en el rango que sí se convierte en alfa.
+      const tolAmplia2 = tol2*6;
+      let minX=canvas.width, minY=canvas.height, maxX=0, maxY=0, removidos=0, claveResidual=0;
       for(let i=0;i<d.length;i+=4){
         const r=d[i], g=d[i+1], b=d[i+2];
         const dist2 = (r-key.r)*(r-key.r) + (g-key.g)*(g-key.g) + (b-key.b)*(b-key.b);
@@ -841,24 +854,65 @@ function quitarFondoColor(dataUrl, claveHex, tolerancia){
           d[i+3] = Math.round(255*factor);
           if(key.g>=key.r && key.g>=key.b) d[i+1] = Math.min(d[i+1], Math.max(r,b));
           else if(key.b>=key.r && key.b>=key.g) d[i+2] = Math.min(d[i+2], Math.max(r,g));
+        } else if(dist2 < tolAmplia2){
+          claveResidual++;
         }
         if(d[i+3] > 10){
           const px = (i/4)%canvas.width, py = Math.floor((i/4)/canvas.width);
           if(px<minX)minX=px; if(px>maxX)maxX=px; if(py<minY)minY=py; if(py>maxY)maxY=py;
         }
       }
+      // Los 4 rincones de un lienzo tipo "foto de producto" son casi
+      // siempre fondo puro — si después de quitar el color clave siguen
+      // opacos, es la señal más directa de que el recorte no funcionó
+      // (ej. el "rectángulo verde completo" visto en pruebas), más
+      // confiable que solo mirar el % total removido.
+      function alfaPromedioEsquina(x0,y0,x1,y1){
+        let suma=0, n=0;
+        for(let y=y0;y<y1;y+=2) for(let x=x0;x<x1;x+=2){
+          suma += d[(y*canvas.width+x)*4+3]; n++;
+        }
+        return n ? suma/n : 0;
+      }
+      const m = Math.round(Math.min(canvas.width,canvas.height)*0.05);
+      const alfaEsquinas = (
+        alfaPromedioEsquina(0,0,m,m) + alfaPromedioEsquina(canvas.width-m,0,canvas.width,m) +
+        alfaPromedioEsquina(0,canvas.height-m,m,canvas.height) + alfaPromedioEsquina(canvas.width-m,canvas.height-m,canvas.width,canvas.height)
+      ) / 4;
       ctx.putImageData(imgData,0,0);
-      const pctRemovido = removidos/(canvas.width*canvas.height);
+      const totalPx = canvas.width*canvas.height;
+      const pctRemovido = removidos/totalPx;
+      const pctClaveResidual = claveResidual/totalPx;
       const bboxPct = (maxX>=minX && maxY>=minY) ? {
         x: (minX/canvas.width)*100, y: (minY/canvas.height)*100,
         w: Math.max(1,((maxX-minX)/canvas.width)*100), h: Math.max(1,((maxY-minY)/canvas.height)*100)
       } : {x:0,y:0,w:100,h:100};
       const outUrl = canvas.toDataURL('image/png');
-      resolve({ dataUrl: outUrl, base64: outUrl.split(',')[1], bboxPct, pctRemovido });
+      resolve({ dataUrl: outUrl, base64: outUrl.split(',')[1], bboxPct, pctRemovido, pctClaveResidual, alfaEsquinas, ancho: canvas.width, alto: canvas.height });
     };
     img.onerror = ()=> resolve(null);
     img.src = dataUrl;
   });
+}
+// Validación real del resultado de quitarFondoColor antes de subirlo y
+// usarlo como capa — cualquiera de estas señales por separado puede
+// fallar sin que las otras lo noten (probado en pruebas reales: quedó un
+// bloque del color clave sin quitar con un % removido "razonable" porque
+// el resto del lienzo sí se procesó bien). NO se usa un tope superior de
+// % removido — es category-dependiente (un tenis ocupa una fracción del
+// lienzo mucho más chica que un vestido, remover 90%+ ahí es normal y
+// correcto, no una falla) — en su lugar se valida directamente que las
+// esquinas queden transparentes, que no sobre color clave, y que la
+// prenda no haya quedado invisible (bbox mínimo).
+function capaEsValida(recorte){
+  if(!recorte) return false;
+  if(recorte.ancho!==MANIQUI_CANVAS.w || recorte.alto!==MANIQUI_CANVAS.h) return false;
+  if(recorte.pctRemovido<=0.02) return false; // no se quitó casi nada del fondo
+  if(recorte.pctClaveResidual>0.08) return false; // sobró un bloque del color clave sin quitar
+  if(recorte.alfaEsquinas>40) return false; // las esquinas (casi siempre fondo) deberían quedar transparentes
+  const areaPrenda = (recorte.bboxPct.w/100) * (recorte.bboxPct.h/100);
+  if(areaPrenda<0.02) return false; // la prenda quedó casi invisible
+  return true;
 }
 async function crearFilaPrenda(it, origenUrl){
   let fotoRealUrl = '';
@@ -880,11 +934,11 @@ async function crearFilaPrenda(it, origenUrl){
       });
       if(gen.ok){
         const recorte = await quitarFondoColor('data:'+(gen.mimeType||'image/jpeg')+';base64,'+gen.imageBase64, clave.hex);
-        // Salvavidas: si el chroma-key quitó sospechosamente poco o
-        // demasiado del lienzo, probablemente falló (color clave
-        // colisionó con la prenda, o la IA no respetó el fondo pedido) —
-        // mejor guardar sin capa que subir algo roto.
-        if(recorte && recorte.pctRemovido > 0.05 && recorte.pctRemovido < 0.85){
+        // Salvavidas: si el chroma-key no quitó bien el fondo (poco,
+        // demasiado, o dejó un bloque del color clave sin quitar en algún
+        // lado — probado en pruebas reales), mejor guardar sin capa que
+        // subir algo roto.
+        if(capaEsValida(recorte)){
           const subGen = await apiPost('uploadImage', { imageBase64: recorte.base64, mimeType:'image/png', fileName:'capa-'+Date.now()+'.png' });
           if(subGen.ok){
             fotoGeneradaUrl = subGen.url;
@@ -1443,8 +1497,8 @@ async function regenerarCapaDesdeImagen(p, dataUrl, feedback, btn, textoBtnNorma
   });
   if(!gen.ok){ showToast('No se pudo generar: '+(gen.error||'')); if(btn){ btn.disabled=false; btn.textContent=textoBtnNormal; } return false; }
   const recorte = await quitarFondoColor('data:'+(gen.mimeType||'image/jpeg')+';base64,'+gen.imageBase64, clave.hex);
-  if(!recorte || recorte.pctRemovido<=0.05 || recorte.pctRemovido>=0.85){
-    showToast('El resultado no quedó bien (probablemente el color de fondo chocó con la prenda) — intenta de nuevo');
+  if(!capaEsValida(recorte)){
+    showToast('El resultado no quedó bien (fondo mal quitado o chocó con la prenda) — intenta de nuevo');
     if(btn){ btn.disabled=false; btn.textContent=textoBtnNormal; }
     return false;
   }
@@ -1605,7 +1659,7 @@ async function pedirSugerencias(){
   const maniqui = await obtenerManiquiBase(genero);
   wrap.innerHTML = badgeModelo + ideas.map(o=>{
     const prendas = o.prendaIds.map(id=>findPrenda(id)).filter(Boolean);
-    const capas = maniqui && maniqui.url ? `<img class="maniqui-doll-base" src="${maniqui.url}">` + prendas.map(p=> p.FotoURL?`<img class="maniqui-doll-capa-full" src="${p.FotoURL}">`:'').join('') : '<p class="hint">No se pudo cargar el maniquí</p>';
+    const capas = maniqui && maniqui.url ? `<img class="maniqui-doll-base" src="${maniqui.url}">` + prendas.map(p=> p.FotoGeneradaURL?`<img class="maniqui-doll-capa-full" src="${p.FotoGeneradaURL}">`:'').join('') : '<p class="hint">No se pudo cargar el maniquí</p>';
     return `<div class="outfit-card">
       <div class="maniqui-doll-wrap" style="max-width:200px">${capas}</div>
       <div class="outfit-items">${prendas.map(p=>fotoRecortadaHtml(p,{estilo:'height:64px;flex:none'})).join('')}</div>
@@ -1692,11 +1746,18 @@ async function renderVestidorPreview(){
   }
   cont.innerHTML = `<img class="maniqui-doll-base" src="${maniqui.url}">` + capasHtml();
 }
+// El maniquí SOLO recibe FotoGeneradaURL (la capa transparente real,
+// alineada al lienzo canónico) — nunca FotoURL como respaldo: FotoURL
+// puede apuntar a FotoRealURL/FotoOrigenURL (foto rectangular normal, sin
+// transparencia ni alineación) cuando la generación de la capa falló, y
+// ponerla encima del maniquí se vería como una foto pegada, no una
+// prenda puesta. Si no hay capa, esa prenda simplemente no se dibuja
+// (ver renderCapasLista para el aviso).
 function capasHtml(){
   return outfitBoard.capas.map(id=>{
     const p = findPrenda(id);
-    if(!p || !p.FotoURL) return '';
-    return `<img class="maniqui-doll-capa-full" src="${p.FotoURL}" onclick="verFotoGrande('${p.FotoURL}')">`;
+    if(!p || !p.FotoGeneradaURL) return '';
+    return `<img class="maniqui-doll-capa-full" src="${p.FotoGeneradaURL}" onclick="verFotoGrande('${p.FotoGeneradaURL}')">`;
   }).join('');
 }
 function renderCapasLista(){
@@ -1709,9 +1770,10 @@ function renderCapasLista(){
       const idx = outfitBoard.capas.indexOf(p.ID);
       const esUltimo = idx === outfitBoard.capas.length-1;
       const esPrimero = idx === 0;
-      return `<div class="capa-row">
+      const sinCapa = !p.FotoGeneradaURL;
+      return `<div class="capa-row" style="flex-wrap:wrap">
         ${fotoRecortadaHtml(p,{estilo:'height:44px;flex:none;border-radius:8px', clickable:false})}
-        <div class="capa-row-info">${escAttr(p.Tipo||p.Categoria)}</div>
+        <div class="capa-row-info">${escAttr(p.Tipo||p.Categoria)}${sinCapa?`<br><span class="hint" style="color:var(--accent)">⚠️ Todavía no tiene capa para el Vestidor (no se dibuja sobre el maniquí). <a href="javascript:void(0)" onclick="abrirEditarPrenda('${p.ID}')">Regenerar</a></span>`:''}</div>
         <button class="btn ghost" style="padding:4px 8px" ${esUltimo?'disabled':''} onclick="moverCapaOutfit('${p.ID}',1)" title="Más encima">▲</button>
         <button class="btn ghost" style="padding:4px 8px" ${esPrimero?'disabled':''} onclick="moverCapaOutfit('${p.ID}',-1)" title="Más abajo">▼</button>
         <button class="remove" onclick="quitarCapaOutfit('${p.ID}')" title="Quitar del outfit">🗑</button>
