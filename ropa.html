@@ -338,7 +338,7 @@ let SHEET_URL = '';
 // Nombre-landmark de esta versión — cámbialo en cada cambio que se
 // despliegue, así se puede saber a simple vista (en Perfil) si el
 // celular ya está viendo lo último o una copia vieja en caché.
-const BUILD_VERSION = 'Xalapa2';
+const BUILD_VERSION = 'Zacatecas2';
 let DATA = { prendas: [], usos: [], outfits_sugeridos: [], perfil: [], fotos_origen: [] };
 let showTrash = false;
 let soloFavoritos = false;
@@ -3377,11 +3377,29 @@ async function registrarFotoOrigenSiFalta(url){
   DATA.fotos_origen.push(row);
   await apiPost('saveRow', { table:'FOTOS_ORIGEN', row });
 }
+// Una prenda queda "de esta foto" de DOS formas: se creó de ahí
+// (FotoOrigenURL) O se marcó "ya la tengo" al analizar esa foto (no
+// genera una prenda nueva, solo queda registrada en USOS con esta
+// FotoURL) — antes solo se contaba la primera, así que una prenda
+// emparejada (no creada) nunca aparecía aquí aunque sí estuviera en esa
+// foto. Pedido explícito: que si la marco como "ya la tengo" también
+// quede en el histórico de esa imagen.
+function prendasDeLaFoto(url){
+  const porOrigen = DATA.prendas.filter(p=>p.FotoOrigenURL===url && !esVerdadero(p.Papelera));
+  const idsPorUso = new Set();
+  DATA.usos.filter(u=>u.FotoURL===url).forEach(u=>{
+    let ids = []; try{ ids = JSON.parse(u.PrendaIDsJSON||'[]'); }catch(e){}
+    ids.forEach(id=>idsPorUso.add(id));
+  });
+  const porUso = Array.from(idsPorUso).map(id=>findPrenda(id)).filter(p=>p && !esVerdadero(p.Papelera));
+  const vistos = new Set();
+  return porOrigen.concat(porUso).filter(p=> vistos.has(p.ID) ? false : (vistos.add(p.ID), true));
+}
 function renderFotosSubidas(){
   const cont = document.getElementById('fotosSubidasArea');
   if(!DATA.fotos_origen.length){ cont.innerHTML = '<p class="hint">Todavía no hay fotos de origen guardadas.</p>'; return; }
   cont.innerHTML = DATA.fotos_origen.map(f=>{
-    const prendas = DATA.prendas.filter(p=>p.FotoOrigenURL===f.URL && !esVerdadero(p.Papelera));
+    const prendas = prendasDeLaFoto(f.URL);
     const fechaInput = f.Fecha && !isNaN(new Date(f.Fecha).getTime()) ? new Date(f.Fecha).toISOString().slice(0,10) : '';
     return `<div class="detect-card" style="align-items:flex-start;flex-wrap:wrap">
       <img src="${f.URL}" onclick="verFotoGrande('${f.URL}')" style="width:64px;height:64px;object-fit:cover;border-radius:8px;cursor:zoom-in;flex:none">
