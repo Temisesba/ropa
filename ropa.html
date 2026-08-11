@@ -321,8 +321,8 @@ let SHEET_URL = '';
 // Nombre-landmark de esta versión — cámbialo en cada cambio que se
 // despliegue, así se puede saber a simple vista (en Perfil) si el
 // celular ya está viendo lo último o una copia vieja en caché.
-const BUILD_VERSION = 'Zacatecas';
-let DATA = { prendas: [], usos: [], outfits_sugeridos: [], perfil: [], fotos_origen: [], plantillas: [] };
+const BUILD_VERSION = 'Campeche';
+let DATA = { prendas: [], usos: [], outfits_sugeridos: [], perfil: [], fotos_origen: [] };
 let showTrash = false;
 let soloFavoritos = false;
 let activeCategoria = 'Todas';
@@ -397,7 +397,7 @@ function finishSetup(){
   });
 }
 function normalizeData(d){
-  return { prendas: d.prendas||[], usos: d.usos||[], outfits_sugeridos: d.outfits_sugeridos||[], perfil: d.perfil||[], fotos_origen: d.fotos_origen||[], plantillas: d.plantillas||[] };
+  return { prendas: d.prendas||[], usos: d.usos||[], outfits_sugeridos: d.outfits_sugeridos||[], perfil: d.perfil||[], fotos_origen: d.fotos_origen||[] };
 }
 
 function boot(){
@@ -811,10 +811,10 @@ const MANIQUI_CANVAS = { w: 720, h: 1280 };
 // porque el maniquí siempre es el mismo (una vez generado, se cachea).
 const ANCLAS_MANIQUI = { cabeza:4.0, rostro:10.0, cuello:16.0, hombros:20.0, pecho:28.9, cintura:40.0, cadera:45.8, munecas:47.0, rodillas:73.4, tobillos:90.4, pies:93.0 };
 // Por categoría: ancho objetivo (% del lienzo) y a qué ancla se alinea
-// el borde superior (o inferior, para calzado) de la prenda — respaldo
-// para cuando el Tipo no calza con ningún MOLDE de abajo. La altura
-// nunca se fuerza — se preserva la proporción real de cada prenda, solo
-// se ancla un punto y se escala por el ancho.
+// el borde superior (o inferior, para calzado) de la prenda. La altura
+// nunca se fuerza — se preserva la proporción real de cada prenda
+// (recorte apaisado o largo cae donde le corresponda según su propio
+// bbox), solo se ancla un punto y se escala por el ancho.
 const REGLAS_ANCLA = {
   'Ropa superior': { ancho:46, vAlign:'top',    anclaY:'hombros' },
   'Vestidos':      { ancho:46, vAlign:'top',    anclaY:'hombros' },
@@ -844,12 +844,11 @@ const REGLAS_ANCLA = {
 // siempre cae donde ya sabemos que se ve bien. Si el Tipo no coincide
 // con ningún molde, cae a la regla de categoría de siempre (REGLAS_ANCLA).
 //
-// Los moldes se pueden re-ajustar a mano (Perfil → "Moldes del maniquí",
-// o guardando un "✋ Ajustar en maniquí" como molde) y el ajuste queda
-// guardado para TODAS las prendas futuras de ese tipo — y con un botón
-// se puede reacomodar de un jalón (sin IA) las que ya existían. El orden
-// importa: lo específico va antes que lo genérico ("falda larga" antes
-// que "falda"), porque gana la primera coincidencia.
+// Los moldes se pueden re-ajustar a mano una sola vez (Perfil → "Moldes
+// del maniquí", o guardando un "✋ Ajustar en maniquí" como molde) y el
+// ajuste queda guardado para TODAS las prendas futuras de ese tipo.
+// El orden importa: lo específico va antes que lo genérico ("falda
+// larga" antes que "falda"), porque gana la primera coincidencia.
 const MOLDES_BASE = [
   // Ropa superior
   { clave:'playera',      nombre:'Playera / camiseta',   grupo:'Arriba',      patrones:['playera','camiseta','tshirt','t-shirt','polo'],                          regla:{ ancho:46, vAlign:'top', anclaY:20.0, xCentro:50 } },
@@ -900,8 +899,8 @@ function reglaMolde(clave){
   return Object.assign({}, base.regla, MOLDES_USUARIO[clave]||{});
 }
 function moldeEstaAjustado(clave){ return !!MOLDES_USUARIO[clave]; }
-// Qué molde le toca a una prenda, según su Tipo. Devuelve '' si nada
-// coincide (cae a REGLAS_ANCLA por categoría en reglaAnclaParaPrenda).
+// Qué molde le toca a una prenda, según su Tipo (y su Categoría como
+// desempate cuando el Tipo no dice nada). Devuelve '' si nada coincide.
 function claveMoldeParaPrenda(categoria, tipo){
   const t = normalizarTexto(tipo);
   if(t){
@@ -1151,6 +1150,32 @@ function reposicionarCapaConRegla(dataUrl, bboxPct, regla){
     img.src = dataUrl;
   });
 }
+// Ajuste manual ("✋ Ajustar en maniquí", ver Editar prenda): parte de la
+// capa YA canónica (720x1280, ya sea la puesta automáticamente por
+// reposicionarCapa o una versión ajustada antes) y aplica un desplazamiento
+// (dx,dy en % del lienzo) + escala adicional, centrada en el lienzo —
+// produce, igual que reposicionarCapa, un nuevo PNG 720x1280 final.
+function aplicarAjusteManual(dataUrl, ajuste){
+  return new Promise(resolve=>{
+    const img = new Image();
+    img.onload = ()=>{
+      const W = MANIQUI_CANVAS.w, H = MANIQUI_CANVAS.h;
+      const s = ajuste.scale||1;
+      const dxPx = (ajuste.dx||0)/100*W, dyPx = (ajuste.dy||0)/100*H;
+      const canvas = document.createElement('canvas');
+      canvas.width = W; canvas.height = H;
+      const ctx = canvas.getContext('2d');
+      ctx.setTransform(s,0,0,s, W/2*(1-s)+dxPx, H/2*(1-s)+dyPx);
+      ctx.drawImage(img, 0, 0);
+      ctx.setTransform(1,0,0,1,0,0);
+      const bboxNuevo = escanearBboxAlfa(ctx, W, H);
+      const outUrl = canvas.toDataURL('image/png');
+      resolve({ dataUrl: outUrl, base64: outUrl.split(',')[1], bboxPct: bboxNuevo });
+    };
+    img.onerror = ()=> resolve(null);
+    img.src = dataUrl;
+  });
+}
 // Mide el rectángulo real (alfa) de una capa ya canónica. Se usa cuando
 // hay que re-alinear una prenda vieja y no se confía en su BBoxJSON (por
 // ejemplo prendas de antes de que existiera ese campo).
@@ -1197,32 +1222,6 @@ async function realinearPrendaAMolde(p, regla){
 function prendasDelMolde(clave){
   return DATA.prendas.filter(p=>!esVerdadero(p.Papelera) && p.FotoGeneradaURL && claveMoldeParaPrenda(p.Categoria, p.Tipo)===clave);
 }
-// Ajuste manual ("✋ Ajustar en maniquí", ver Editar prenda): parte de la
-// capa YA canónica (720x1280, ya sea la puesta automáticamente por
-// reposicionarCapa o una versión ajustada antes) y aplica un desplazamiento
-// (dx,dy en % del lienzo) + escala adicional, centrada en el lienzo —
-// produce, igual que reposicionarCapa, un nuevo PNG 720x1280 final.
-function aplicarAjusteManual(dataUrl, ajuste){
-  return new Promise(resolve=>{
-    const img = new Image();
-    img.onload = ()=>{
-      const W = MANIQUI_CANVAS.w, H = MANIQUI_CANVAS.h;
-      const s = ajuste.scale||1;
-      const dxPx = (ajuste.dx||0)/100*W, dyPx = (ajuste.dy||0)/100*H;
-      const canvas = document.createElement('canvas');
-      canvas.width = W; canvas.height = H;
-      const ctx = canvas.getContext('2d');
-      ctx.setTransform(s,0,0,s, W/2*(1-s)+dxPx, H/2*(1-s)+dyPx);
-      ctx.drawImage(img, 0, 0);
-      ctx.setTransform(1,0,0,1,0,0);
-      const bboxNuevo = escanearBboxAlfa(ctx, W, H);
-      const outUrl = canvas.toDataURL('image/png');
-      resolve({ dataUrl: outUrl, base64: outUrl.split(',')[1], bboxPct: bboxNuevo });
-    };
-    img.onerror = ()=> resolve(null);
-    img.src = dataUrl;
-  });
-}
 async function crearFilaPrenda(it, origenUrl){
   let fotoRealUrl = '';
   if(it.caja && it.cropPreview){
@@ -1249,10 +1248,10 @@ async function crearFilaPrenda(it, origenUrl){
         // subir algo roto.
         if(capaEsValida(recorte)){
           // Enfoque híbrido determinista: la posición final la decide el
-          // código, con el MOLDE de su tipo (o la ancla de categoría si
-          // no hay molde) — no la referencia visual del maniquí que le
-          // mandamos a la IA, que ayuda a que la escala/forma salga bien
-          // pero no garantiza la posición exacta.
+          // código con anclas fijas (reposicionarCapa), no la referencia
+          // visual del maniquí que le mandamos a la IA — esa referencia
+          // ayuda a que la prenda salga con la forma/escala correcta,
+          // pero no garantiza la posición exacta, así que se corrige acá.
           const reposicionada = await reposicionarCapa(recorte.dataUrl, recorte.bboxPct, it.categoria, it.tipo);
           const final = reposicionada || recorte;
           const subGen = await apiPost('uploadImage', { imageBase64: final.base64, mimeType:'image/png', fileName:'capa-'+Date.now()+'.png' });
@@ -2218,15 +2217,41 @@ async function renderVestidorPreview(){
 // vertical de su BBoxJSON) — pedido explícito: swipear directo sobre la
 // prenda que se ve puesta, no solo desde la lista de abajo. Solo se
 // muestran si esa categoría tiene más de una prenda entre las que elegir.
+// Las flechas del carrusel NO se posicionan según la imagen de cada
+// prenda (era lo que hacía que brincaran de lugar cada vez que cambiabas
+// de prenda: se calculaban con el centro del bbox, que cambia con cada
+// foto). Ahora cada CATEGORÍA tiene su renglón fijo sobre el maniquí, así
+// que cambiar de suéter a suéter deja las flechas exactamente donde
+// estaban — solo se mueven si cambia la lista de categorías del outfit.
+const FILA_FLECHA_CATEGORIA = {
+  'Accesorios':10, 'Abrigos':26, 'Ropa superior':32, 'Deportiva':32, 'Vestidos':36,
+  'Bolsos':44, 'Ropa interior':48, 'Ropa inferior':56, 'Calzado':88
+};
+// Separa los renglones que queden demasiado juntos (mínimo 9% entre uno y
+// otro) y mantiene todo dentro del lienzo — determinista: la misma lista
+// de categorías siempre da los mismos renglones.
+function filasFlechas(ids){
+  const base = ids.map(id=>{
+    const p = findPrenda(id);
+    const v = p ? FILA_FLECHA_CATEGORIA[p.Categoria] : undefined;
+    return (v===undefined) ? 50 : v;
+  });
+  const orden = base.map((v,i)=>({i,v})).sort((a,b)=>a.v-b.v);
+  let ultimo = -99;
+  orden.forEach(o=>{ o.v = Math.max(o.v, ultimo+9); ultimo = o.v; });
+  const exceso = orden.length ? Math.max(0, orden[orden.length-1].v - 94) : 0;
+  const res = new Array(base.length);
+  orden.forEach(o=>{ res[o.i] = Math.min(94, Math.max(6, o.v - exceso)); });
+  return res;
+}
 function capasHtml(){
-  return outfitBoard.capas.map(id=>{
+  const filas = filasFlechas(outfitBoard.capas);
+  return outfitBoard.capas.map((id, i)=>{
     const p = findPrenda(id);
     if(!p || !p.FotoGeneradaURL) return '';
     let flechas = '';
     if(itemsPorCategoria(p.Categoria).length>1){
-      let bbox = null;
-      if(p.BBoxJSON){ try{ bbox = JSON.parse(p.BBoxJSON); }catch(e){} }
-      const topPct = bbox ? (bbox.y + bbox.h/2) : 50;
+      const topPct = filas[i];
       flechas = `<button class="maniqui-arrow left" style="top:${topPct}%" onclick="cambiarPrendaCarrusel('${p.ID}',-1)" title="Prenda anterior de ${escAttr(p.Categoria)}">‹</button>` +
         `<button class="maniqui-arrow right" style="top:${topPct}%" onclick="cambiarPrendaCarrusel('${p.ID}',1)" title="Siguiente prenda de ${escAttr(p.Categoria)}">›</button>`;
     }
