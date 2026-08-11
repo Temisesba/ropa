@@ -321,7 +321,7 @@ let SHEET_URL = '';
 // Nombre-landmark de esta versión — cámbialo en cada cambio que se
 // despliegue, así se puede saber a simple vista (en Perfil) si el
 // celular ya está viendo lo último o una copia vieja en caché.
-const BUILD_VERSION = 'Ensenada';
+const BUILD_VERSION = 'Fresnillo';
 let DATA = { prendas: [], usos: [], outfits_sugeridos: [], perfil: [], fotos_origen: [] };
 let showTrash = false;
 let soloFavoritos = false;
@@ -1086,19 +1086,15 @@ function quitarFondoColor(dataUrl, claveHex, tolerancia){
 // correcto, no una falla) — en su lugar se valida directamente que las
 // esquinas queden transparentes, que no sobre color clave, y que la
 // prenda no haya quedado invisible (bbox mínimo).
-// Bolsos/Accesorios/Calzado nunca deberían ocupar casi toda la altura del
-// lienzo — si el bbox llega a ese tamaño, casi seguro es que la IA dibujó
-// el maniquí completo (o gran parte del cuerpo) en vez de solo la prenda,
-// a pesar de que el prompt lo prohíbe explícitamente (visto real: un
-// bolso cruzado generado con el maniquí desnudo completo debajo, que pasó
-// las demás validaciones porque el fondo SÍ se quitó bien alrededor del
-// cuerpo — el problema no era el color, era el contenido).
-// Calzado NO lleva tope: no hay evidencia real de que traiga el cuerpo
-// completo (el problema visto ahí era otro — un bloque de fondo mal
-// quitado, no un maniquí de cuerpo entero) y un tope puesto sin prueba
-// real terminó rechazando botas que antes se generaban bien (reportado
-// por el usuario) — quitado hasta tener evidencia real de ese caso.
-const CATEGORIA_ALTURA_MAX = { Bolsos: 55, Accesorios: 55 };
+// Un bolso/accesorio que ocupa CASI TODA la altura del lienzo (cerca de
+// lo que ocupa el maniquí de cuerpo completo) es casi seguro el bug real
+// visto (bolso cruzado y una bufanda generados con el maniquí/cara
+// completa debajo). El primer intento de este tope (55%) resultó
+// DEMASIADO estricto — rechazaba bufandas largas y bolsos con correa
+// larga que eran válidos, solo altos — así que se sube bastante (78%)
+// para que solo atrape el caso extremo (cuerpo casi completo), no
+// cualquier accesorio simplemente largo.
+const CATEGORIA_ALTURA_MAX = { Bolsos: 78, Accesorios: 78 };
 function capaEsValida(recorte, categoria){
   if(!recorte) return false;
   if(recorte.ancho!==MANIQUI_CANVAS.w || recorte.alto!==MANIQUI_CANVAS.h) return false;
