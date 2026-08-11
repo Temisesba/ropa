@@ -322,7 +322,7 @@ let SHEET_URL = '';
 // Nombre-landmark de esta versión — cámbialo en cada cambio que se
 // despliegue, así se puede saber a simple vista (en Perfil) si el
 // celular ya está viendo lo último o una copia vieja en caché.
-const BUILD_VERSION = 'Merida2';
+const BUILD_VERSION = 'Nogales';
 let DATA = { prendas: [], usos: [], outfits_sugeridos: [], perfil: [], fotos_origen: [] };
 let showTrash = false;
 let soloFavoritos = false;
@@ -1931,7 +1931,8 @@ async function abrirBorrador(p){
   const fileId = fileIdDeUrlDrive(p.FotoGeneradaURL);
   if(!fileId){ showToast('No se pudo identificar la foto generada'); return; }
   showToast('Cargando foto…');
-  const r = await apiPost('descargarImagenDrive', { fileId });
+  const genero = localStorage.getItem('ropa_maniqui_genero')||'mujer';
+  const [r, maniqui] = await Promise.all([ apiPost('descargarImagenDrive', { fileId }), obtenerManiquiBase(genero) ]);
   if(!r.ok){ showToast('No se pudo cargar la foto: '+(r.error||'sin conexión')); return; }
   const img = new Image();
   const cargada = new Promise((resolve,reject)=>{ img.onload=resolve; img.onerror=reject; });
@@ -1941,17 +1942,22 @@ async function abrirBorrador(p){
   overlay.className = 'modal-overlay';
   overlay.innerHTML = `<div class="modal">
     <h3>Borrador</h3>
-    <p class="hint">Pinta encima para borrar esa parte (queda transparente) — sin IA, tú decides exactamente qué desaparece.</p>
+    <p class="hint">Pinta encima para borrar esa parte (queda transparente) — se ve sobre el maniquí para que sepas exactamente qué falta quitar. Sin IA, tú decides.</p>
     <div class="chips" style="justify-content:center">
       <button class="chip active" id="modoLibre">✏️ Trazo libre</button>
-      <button class="chip" id="modoOvalo">⭕ Óvalo (curvas limpias)</button>
+      <button class="chip" id="modoOvalo">⭕ Óvalo</button>
+      <button class="chip" id="modoRect">▭ Rectángulo</button>
+      <button class="chip" id="modoVarita">🪄 Varita (clic y selecciona)</button>
     </div>
     <div style="max-width:280px;max-height:55vh;overflow:auto;margin:10px auto 0;border-radius:10px;border:1px solid var(--border)">
-      <div class="checker-bg" style="display:inline-block"><canvas id="borradorCanvas" style="touch-action:none;display:block"></canvas></div>
+      <div class="maniqui-doll-wrap" id="borradorWrap" style="max-width:none;margin:0">
+        <img class="maniqui-doll-base" src="${maniqui&&maniqui.url?maniqui.url:''}">
+        <canvas id="borradorCanvas" style="position:absolute;inset:0;width:100%;height:100%;touch-action:none"></canvas>
+      </div>
     </div>
     <p class="hint" style="text-align:center;margin-top:8px">🔍 Zoom (para cortes finos)</p>
     <input type="range" id="borradorZoom" min="100" max="500" value="100" style="width:100%">
-    <p class="hint" style="text-align:center;margin-top:8px">Grosor del borrador</p>
+    <p class="hint" style="text-align:center;margin-top:8px" id="borradorGrosorLabel">Grosor del borrador</p>
     <input type="range" id="borradorGrosor" min="1" max="60" value="12" style="width:100%">
     <div class="chips" style="justify-content:center;margin-top:6px">
       <button class="chip" id="borradorDeshacer">↩ Deshacer trazo</button>
@@ -1963,29 +1969,39 @@ async function abrirBorrador(p){
     </div>
   </div>`;
   document.body.appendChild(overlay);
+  const wrap = document.getElementById('borradorWrap');
+  wrap.style.width = '280px';
   const canvas = document.getElementById('borradorCanvas');
   canvas.width = img.naturalWidth; canvas.height = img.naturalHeight;
-  canvas.style.width = '280px';
   const ctx = canvas.getContext('2d');
   ctx.drawImage(img, 0, 0);
-  // buffer = el estado YA confirmado (sin la vista previa del óvalo encima)
+  // buffer = el estado YA confirmado (sin la vista previa del óvalo/rectángulo encima)
   const buffer = document.createElement('canvas');
   buffer.width = canvas.width; buffer.height = canvas.height;
   const bctx = buffer.getContext('2d');
   bctx.drawImage(img, 0, 0);
-  // Pila de deshacer: una copia del buffer justo ANTES de cada trazo/óvalo
-  // confirmado — "Deshacer" solo repone la última, no borra todo de un jalón.
+  // Pila de deshacer: una copia del buffer justo ANTES de cada trazo/figura/
+  // varita confirmada — "Deshacer" solo repone la última, no borra todo de un jalón.
   let historial = [];
   const guardarHistorial = ()=>{
     historial.push(bctx.getImageData(0,0,buffer.width,buffer.height));
     if(historial.length>25) historial.shift();
   };
-  let modoOvalo = false, grosor = 12, activo = false, inicio = null, ultimo = null;
-  document.getElementById('borradorZoom').oninput = e=>{ canvas.style.width = (280*Number(e.target.value)/100)+'px'; };
+  let modo = 'libre', grosor = 12, activo = false, inicio = null, ultimo = null;
+  document.getElementById('borradorZoom').oninput = e=>{ wrap.style.width = (280*Number(e.target.value)/100)+'px'; };
   document.getElementById('borradorGrosor').oninput = e=> grosor = Number(e.target.value);
-  const btnLibre = document.getElementById('modoLibre'), btnOvalo = document.getElementById('modoOvalo');
-  btnLibre.onclick = ()=>{ modoOvalo=false; btnLibre.classList.add('active'); btnOvalo.classList.remove('active'); };
-  btnOvalo.onclick = ()=>{ modoOvalo=true; btnOvalo.classList.add('active'); btnLibre.classList.remove('active'); };
+  const botonesModo = { libre: document.getElementById('modoLibre'), ovalo: document.getElementById('modoOvalo'), rectangulo: document.getElementById('modoRect'), varita: document.getElementById('modoVarita') };
+  const grosorLabel = document.getElementById('borradorGrosorLabel'), grosorInput = document.getElementById('borradorGrosor');
+  function elegirModo(m){
+    modo = m;
+    Object.entries(botonesModo).forEach(([k,b])=> b.classList.toggle('active', k===m));
+    grosorLabel.style.display = m==='varita' ? 'none' : '';
+    grosorInput.style.display = m==='varita' ? 'none' : '';
+  }
+  botonesModo.libre.onclick = ()=> elegirModo('libre');
+  botonesModo.ovalo.onclick = ()=> elegirModo('ovalo');
+  botonesModo.rectangulo.onclick = ()=> elegirModo('rectangulo');
+  botonesModo.varita.onclick = ()=> elegirModo('varita');
   const escala = ()=> canvas.width / canvas.getBoundingClientRect().width;
   const posEnCanvas = e=>{
     const rect = canvas.getBoundingClientRect();
@@ -2000,36 +2016,77 @@ async function abrirBorrador(p){
     const pasos = Math.max(1, Math.ceil(dist / Math.max(2, radio*0.5)));
     for(let i=0;i<=pasos;i++){ const t=i/pasos; borrarCirculo(c, { x:a.x+(b.x-a.x)*t, y:a.y+(b.y-a.y)*t }, radio); }
   };
+  const dibujarFigura = (c, esVistaPrevia)=>{
+    c.save();
+    if(esVistaPrevia){ c.setLineDash([8,6]); c.strokeStyle='#ff0000'; c.lineWidth=3; } else { c.globalCompositeOperation = 'destination-out'; }
+    c.beginPath();
+    if(modo==='ovalo') c.ellipse((inicio.x+ultimo.x)/2, (inicio.y+ultimo.y)/2, Math.abs(ultimo.x-inicio.x)/2, Math.abs(ultimo.y-inicio.y)/2, 0, 0, Math.PI*2);
+    else c.rect(Math.min(inicio.x,ultimo.x), Math.min(inicio.y,ultimo.y), Math.abs(ultimo.x-inicio.x), Math.abs(ultimo.y-inicio.y));
+    esVistaPrevia ? c.stroke() : c.fill();
+    c.restore();
+  };
+  // "Varita": como el bote de pintura de Paint pero para borrar — un clic
+  // selecciona toda la región conectada de color parecido (ej. una manga
+  // completa si es de un solo color) y la vuelve transparente de un jalón.
+  function rellenarPorSimilitud(startX, startY, tolerancia){
+    const w = buffer.width, h = buffer.height;
+    const imgData = bctx.getImageData(0,0,w,h);
+    const d = imgData.data;
+    const sx = Math.round(startX), sy = Math.round(startY);
+    if(sx<0||sy<0||sx>=w||sy>=h) return;
+    const idx0 = (sy*w+sx)*4;
+    if(d[idx0+3] < 10) return;
+    const r0=d[idx0], g0=d[idx0+1], b0=d[idx0+2];
+    const tol2 = tolerancia*tolerancia;
+    const visitado = new Uint8Array(w*h);
+    const pila = [sy*w+sx];
+    visitado[sy*w+sx] = 1;
+    while(pila.length){
+      const pos = pila.pop();
+      const px = pos % w, py = (pos - px)/w;
+      const i = pos*4;
+      if(d[i+3] < 10) continue;
+      const dr=d[i]-r0, dg=d[i+1]-g0, db=d[i+2]-b0;
+      if(dr*dr+dg*dg+db*db > tol2) continue;
+      d[i+3] = 0;
+      if(px>0 && !visitado[pos-1]){ visitado[pos-1]=1; pila.push(pos-1); }
+      if(px<w-1 && !visitado[pos+1]){ visitado[pos+1]=1; pila.push(pos+1); }
+      if(py>0 && !visitado[pos-w]){ visitado[pos-w]=1; pila.push(pos-w); }
+      if(py<h-1 && !visitado[pos+w]){ visitado[pos+w]=1; pila.push(pos+w); }
+    }
+    bctx.putImageData(imgData,0,0);
+  }
   canvas.addEventListener('pointerdown', e=>{
+    const pos = posEnCanvas(e);
+    if(modo==='varita'){
+      guardarHistorial();
+      rellenarPorSimilitud(pos.x, pos.y, 40);
+      ctx.clearRect(0,0,canvas.width,canvas.height); ctx.drawImage(buffer,0,0);
+      return;
+    }
     activo = true; canvas.setPointerCapture(e.pointerId);
-    inicio = posEnCanvas(e); ultimo = inicio;
+    inicio = pos; ultimo = pos;
     guardarHistorial();
-    if(!modoOvalo) borrarCirculo(bctx, inicio, grosor*escala());
+    if(modo==='libre') borrarCirculo(bctx, inicio, grosor*escala());
     ctx.clearRect(0,0,canvas.width,canvas.height); ctx.drawImage(buffer,0,0);
   });
   canvas.addEventListener('pointermove', e=>{
     if(!activo) return;
     const pos = posEnCanvas(e);
-    if(modoOvalo){
+    if(modo==='ovalo' || modo==='rectangulo'){
+      ultimo = pos;
       ctx.clearRect(0,0,canvas.width,canvas.height); ctx.drawImage(buffer,0,0);
-      ctx.save(); ctx.setLineDash([8,6]); ctx.strokeStyle='#ff0000'; ctx.lineWidth=3;
-      ctx.beginPath(); ctx.ellipse((inicio.x+pos.x)/2, (inicio.y+pos.y)/2, Math.abs(pos.x-inicio.x)/2, Math.abs(pos.y-inicio.y)/2, 0, 0, Math.PI*2);
-      ctx.stroke(); ctx.restore();
-    } else {
+      dibujarFigura(ctx, true);
+    } else if(modo==='libre'){
       borrarLinea(bctx, ultimo, pos, grosor*escala());
+      ultimo = pos;
       ctx.clearRect(0,0,canvas.width,canvas.height); ctx.drawImage(buffer,0,0);
     }
-    ultimo = pos;
   });
-  canvas.addEventListener('pointerup', e=>{
+  canvas.addEventListener('pointerup', ()=>{
     if(!activo) return;
     activo = false;
-    if(modoOvalo){
-      const pos = posEnCanvas(e);
-      bctx.save(); bctx.globalCompositeOperation = 'destination-out';
-      bctx.beginPath(); bctx.ellipse((inicio.x+pos.x)/2, (inicio.y+pos.y)/2, Math.abs(pos.x-inicio.x)/2, Math.abs(pos.y-inicio.y)/2, 0, 0, Math.PI*2);
-      bctx.fill(); bctx.restore();
-    }
+    if(modo==='ovalo' || modo==='rectangulo') dibujarFigura(bctx, false);
     ctx.clearRect(0,0,canvas.width,canvas.height); ctx.drawImage(buffer,0,0);
   });
   document.getElementById('borradorDeshacer').onclick = ()=>{
