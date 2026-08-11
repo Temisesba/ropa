@@ -338,7 +338,7 @@ let SHEET_URL = '';
 // Nombre-landmark de esta versión — cámbialo en cada cambio que se
 // despliegue, así se puede saber a simple vista (en Perfil) si el
 // celular ya está viendo lo último o una copia vieja en caché.
-const BUILD_VERSION = 'Reynosa';
+const BUILD_VERSION = 'Saltillo';
 let DATA = { prendas: [], usos: [], outfits_sugeridos: [], perfil: [], fotos_origen: [] };
 let showTrash = false;
 let soloFavoritos = false;
@@ -1948,7 +1948,7 @@ async function abrirBorrador(p){
   if(!fileId){ showToast('No se pudo identificar la foto generada'); return; }
   showToast('Cargando foto…');
   const genero = localStorage.getItem('ropa_maniqui_genero')||'mujer';
-  const [r, maniqui] = await Promise.all([ apiPost('descargarImagenDrive', { fileId }), obtenerManiquiBase(genero) ]);
+  const [r, maniquiInfo] = await Promise.all([ apiPost('descargarImagenDrive', { fileId }), maniquiConPeinadoHtml(genero) ]);
   if(!r.ok){ showToast('No se pudo cargar la foto: '+(r.error||'sin conexión')); return; }
   const img = new Image();
   const cargada = new Promise((resolve,reject)=>{ img.onload=resolve; img.onerror=reject; });
@@ -1961,6 +1961,7 @@ async function abrirBorrador(p){
     <p class="hint">Pinta encima para borrar esa parte (queda transparente) — se ve sobre el maniquí para que sepas exactamente qué falta quitar. Sin IA, tú decides.</p>
     <div class="chips" style="justify-content:center;flex-wrap:wrap;overflow:visible">
       <button class="chip active" id="modoLibre">✏️ Trazo libre</button>
+      <button class="chip" id="modoLinea">／ Línea recta</button>
       <button class="chip" id="modoOvalo">⭕ Óvalo</button>
       <button class="chip" id="modoRect">▭ Rectángulo</button>
       <button class="chip" id="modoVarita">🪄 Varita (clic y selecciona)</button>
@@ -1969,7 +1970,7 @@ async function abrirBorrador(p){
     <p class="hint" style="text-align:center;margin-top:4px" id="clonEstado"></p>
     <div style="max-width:280px;max-height:55vh;overflow:auto;margin:10px auto 0;border-radius:10px;border:1px solid var(--border)">
       <div class="maniqui-doll-wrap" id="borradorWrap" style="max-width:none;margin:0">
-        <img class="maniqui-doll-base" src="${maniqui&&maniqui.url?maniqui.url:''}">
+        ${maniquiInfo.html}
         <canvas id="borradorCanvas" style="position:absolute;inset:0;width:100%;height:100%;touch-action:none"></canvas>
       </div>
     </div>
@@ -2010,7 +2011,7 @@ async function abrirBorrador(p){
   let fuenteClon = null, fuenteSnap = null, clonInicio = null;
   document.getElementById('borradorZoom').oninput = e=>{ wrap.style.width = (280*Number(e.target.value)/100)+'px'; };
   document.getElementById('borradorGrosor').oninput = e=> grosor = Number(e.target.value);
-  const botonesModo = { libre: document.getElementById('modoLibre'), ovalo: document.getElementById('modoOvalo'), rectangulo: document.getElementById('modoRect'), varita: document.getElementById('modoVarita'), clonar: document.getElementById('modoClonar') };
+  const botonesModo = { libre: document.getElementById('modoLibre'), linea: document.getElementById('modoLinea'), ovalo: document.getElementById('modoOvalo'), rectangulo: document.getElementById('modoRect'), varita: document.getElementById('modoVarita'), clonar: document.getElementById('modoClonar') };
   const grosorLabel = document.getElementById('borradorGrosorLabel'), grosorInput = document.getElementById('borradorGrosor');
   const clonEstado = document.getElementById('clonEstado'), btnNuevaFuente = document.getElementById('borradorNuevaFuente');
   function elegirModo(m){
@@ -2023,6 +2024,7 @@ async function abrirBorrador(p){
     clonEstado.textContent = m==='clonar' ? 'Toca la parte de tela buena que quieres copiar' : '';
   }
   botonesModo.libre.onclick = ()=> elegirModo('libre');
+  botonesModo.linea.onclick = ()=> elegirModo('linea');
   botonesModo.ovalo.onclick = ()=> elegirModo('ovalo');
   botonesModo.rectangulo.onclick = ()=> elegirModo('rectangulo');
   botonesModo.varita.onclick = ()=> elegirModo('varita');
@@ -2067,6 +2069,14 @@ async function abrirBorrador(p){
     if(modo==='ovalo') c.ellipse((inicio.x+ultimo.x)/2, (inicio.y+ultimo.y)/2, Math.abs(ultimo.x-inicio.x)/2, Math.abs(ultimo.y-inicio.y)/2, 0, 0, Math.PI*2);
     else c.rect(Math.min(inicio.x,ultimo.x), Math.min(inicio.y,ultimo.y), Math.abs(ultimo.x-inicio.x), Math.abs(ultimo.y-inicio.y));
     esVistaPrevia ? c.stroke() : c.fill();
+    c.restore();
+  };
+  // Línea recta: para bordes/cortes que a mano alzada salen chuecos (ej.
+  // un dobladillo) — toca el inicio, arrastra al final, y borra una línea
+  // perfectamente recta del grosor del pincel entre esos dos puntos.
+  const dibujarLineaPreview = (c)=>{
+    c.save(); c.setLineDash([8,6]); c.strokeStyle='#ff0000'; c.lineWidth=3;
+    c.beginPath(); c.moveTo(inicio.x, inicio.y); c.lineTo(ultimo.x, ultimo.y); c.stroke();
     c.restore();
   };
   // "Varita": como el bote de pintura de Paint pero para borrar — un clic
@@ -2130,6 +2140,10 @@ async function abrirBorrador(p){
       ultimo = pos;
       ctx.clearRect(0,0,canvas.width,canvas.height); ctx.drawImage(buffer,0,0);
       dibujarFigura(ctx, true);
+    } else if(modo==='linea'){
+      ultimo = pos;
+      ctx.clearRect(0,0,canvas.width,canvas.height); ctx.drawImage(buffer,0,0);
+      dibujarLineaPreview(ctx);
     } else if(modo==='libre'){
       borrarLinea(bctx, ultimo, pos, grosor*escala());
       ultimo = pos;
@@ -2144,6 +2158,7 @@ async function abrirBorrador(p){
     if(!activo) return;
     activo = false;
     if(modo==='ovalo' || modo==='rectangulo') dibujarFigura(bctx, false);
+    if(modo==='linea') borrarLinea(bctx, inicio, ultimo, grosor*escala());
     ctx.clearRect(0,0,canvas.width,canvas.height); ctx.drawImage(buffer,0,0);
   });
   document.getElementById('borradorDeshacer').onclick = ()=>{
@@ -2171,7 +2186,7 @@ async function abrirBorrador(p){
     localStorage.setItem('ropa_data_cache', JSON.stringify(DATA));
     renderCatalogo();
     const vestidorCont = document.getElementById('vestidorPreview');
-    if(vestidorCont){ const base = vestidorCont.querySelector('.maniqui-doll-base'); vestidorCont.innerHTML = (base?base.outerHTML:'') + capasHtml(); }
+    if(vestidorCont){ const base = vestidorCont.querySelector('.maniqui-doll-base'); const pelo = vestidorCont.querySelector('.maniqui-pelo'); vestidorCont.innerHTML = (base?base.outerHTML:'') + (pelo?pelo.outerHTML:'') + capasHtml(); }
     renderCapasLista();
     overlay.remove();
     refrescarFotoModal(p);
@@ -2212,7 +2227,7 @@ async function aplicarCapaCandidata(p, candidata){
   localStorage.setItem('ropa_data_cache', JSON.stringify(DATA));
   renderCatalogo();
   const vestidorCont = document.getElementById('vestidorPreview');
-  if(vestidorCont){ const base = vestidorCont.querySelector('.maniqui-doll-base'); vestidorCont.innerHTML = (base?base.outerHTML:'') + capasHtml(); }
+  if(vestidorCont){ const base = vestidorCont.querySelector('.maniqui-doll-base'); const pelo = vestidorCont.querySelector('.maniqui-pelo'); vestidorCont.innerHTML = (base?base.outerHTML:'') + (pelo?pelo.outerHTML:'') + capasHtml(); }
   renderCapasLista();
 }
 // Compartido por "🔄 Regenerar" y por recortar-y-regenerar (confirmarRecorteEdicion)
@@ -2275,7 +2290,7 @@ function abrirAccionesPrenda(p){
       localStorage.setItem('ropa_data_cache', JSON.stringify(DATA));
       renderCatalogo();
       const vestidorCont = document.getElementById('vestidorPreview');
-      if(vestidorCont){ const base = vestidorCont.querySelector('.maniqui-doll-base'); vestidorCont.innerHTML = (base?base.outerHTML:'') + capasHtml(); }
+      if(vestidorCont){ const base = vestidorCont.querySelector('.maniqui-doll-base'); const pelo = vestidorCont.querySelector('.maniqui-pelo'); vestidorCont.innerHTML = (base?base.outerHTML:'') + (pelo?pelo.outerHTML:'') + capasHtml(); }
       renderCapasLista();
       showToast('Puesta en el molde de "'+moldeBase(clave).nombre+'"');
     };
@@ -2321,12 +2336,12 @@ async function abrirAjustarManiqui(p){
   overlay.addEventListener('click', e=>{ if(e.target===overlay){ overlay.remove(); ajusteManiqui=null; } });
   overlay.querySelector('#ajustarCancelar').onclick = ()=>{ overlay.remove(); ajusteManiqui=null; };
   overlay.querySelector('#ajustarGuardar').onclick = guardarAjusteManiqui;
-  const maniqui = await obtenerManiquiBase(genero);
+  const maniquiInfo = await maniquiConPeinadoHtml(genero);
   const wrap = document.getElementById('ajustarWrap');
   if(!wrap) return; // el usuario ya cerró el modal mientras cargaba
-  if(!maniqui || !maniqui.url){ wrap.innerHTML = '<p class="hint">No se pudo cargar el maniquí.</p>'; return; }
-  wrap.innerHTML = `<img class="maniqui-doll-base" src="${maniqui.url}">
-    <img class="maniqui-doll-capa-full" id="ajustarImg" src="${p.FotoGeneradaURL}" style="cursor:grab;touch-action:none">`;
+  if(!maniquiInfo.cuerpo){ wrap.innerHTML = '<p class="hint">No se pudo cargar el maniquí.</p>'; return; }
+  wrap.innerHTML = maniquiInfo.html +
+    `<img class="maniqui-doll-capa-full" id="ajustarImg" src="${p.FotoGeneradaURL}" style="cursor:grab;touch-action:none">`;
   aplicarTransformAjuste();
   const img = document.getElementById('ajustarImg');
   let inicio = null;
@@ -2405,7 +2420,7 @@ async function guardarAjusteManiqui(){
   renderCatalogo();
   refrescarFotoModal(p);
   const vestidorCont = document.getElementById('vestidorPreview');
-  if(vestidorCont){ const base = vestidorCont.querySelector('.maniqui-doll-base'); vestidorCont.innerHTML = (base?base.outerHTML:'') + capasHtml(); }
+  if(vestidorCont){ const base = vestidorCont.querySelector('.maniqui-doll-base'); const pelo = vestidorCont.querySelector('.maniqui-pelo'); vestidorCont.innerHTML = (base?base.outerHTML:'') + (pelo?pelo.outerHTML:'') + capasHtml(); }
   renderCapasLista();
   const overlay = document.getElementById('ajustarManiquiOverlay');
   if(overlay) overlay.remove();
@@ -2559,10 +2574,10 @@ async function pedirSugerencias(){
   const badgeModelo = r.modelo ? `<p class="hint">🤖 ${mensajeModelo(r,'Sugerido')}</p>` : '';
   const ideas = r.outfits.map((o,i)=>({ motivo:o.motivo, prendaIds:(o.prendaIds||[]).filter(id=>findPrenda(id)), _idx:i }));
   const genero = localStorage.getItem('ropa_maniqui_genero')||'mujer';
-  const maniqui = await obtenerManiquiBase(genero);
+  const maniquiInfo = await maniquiConPeinadoHtml(genero);
   wrap.innerHTML = badgeModelo + ideas.map(o=>{
     const prendas = o.prendaIds.map(id=>findPrenda(id)).filter(Boolean);
-    const capas = maniqui && maniqui.url ? `<img class="maniqui-doll-base" src="${maniqui.url}">` + prendas.map(p=> p.FotoGeneradaURL?`<img class="maniqui-doll-capa-full" src="${p.FotoGeneradaURL}">`:'').join('') : '<p class="hint">No se pudo cargar el maniquí</p>';
+    const capas = maniquiInfo.cuerpo ? maniquiInfo.html + prendas.map(p=> p.FotoGeneradaURL?`<img class="maniqui-doll-capa-full" src="${p.FotoGeneradaURL}">`:'').join('') : '<p class="hint">No se pudo cargar el maniquí</p>';
     return `<div class="outfit-card">
       <div class="maniqui-doll-wrap" style="max-width:200px">${capas}</div>
       <div class="outfit-items">${prendas.map(p=>fotoRecortadaHtml(p,{estilo:'height:64px;flex:none'})).join('')}</div>
@@ -2641,13 +2656,13 @@ async function renderVestidorPreview(){
   const cont = document.getElementById('vestidorPreview');
   if(!cont) return;
   const genero = localStorage.getItem('ropa_maniqui_genero')||'mujer';
-  const maniqui = await obtenerManiquiBase(genero);
+  const maniquiInfo = await maniquiConPeinadoHtml(genero);
   if(!document.getElementById('vestidorPreview')) return; // se cambió de pantalla mientras cargaba
-  if(!maniqui || !maniqui.url){
+  if(!maniquiInfo.cuerpo){
     cont.innerHTML = '<p class="hint" style="padding:40px 0;text-align:center">No se pudo cargar el maniquí.</p>';
     return;
   }
-  cont.innerHTML = `<img class="maniqui-doll-base" src="${maniqui.url}">` + capasHtml();
+  cont.innerHTML = maniquiInfo.html + capasHtml();
 }
 // El maniquí SOLO recibe FotoGeneradaURL (la capa transparente real,
 // alineada al lienzo canónico) — nunca FotoURL como respaldo: FotoURL
@@ -2742,7 +2757,7 @@ function cambiarPrendaCarrusel(idActual, direccion){
   if(capaIdx<0) return;
   outfitBoard.capas[capaIdx] = opciones[nuevoIdx].ID;
   const cont = document.getElementById('vestidorPreview');
-  if(cont){ const base = cont.querySelector('.maniqui-doll-base'); cont.innerHTML = (base?base.outerHTML:'') + capasHtml(); }
+  if(cont){ const base = cont.querySelector('.maniqui-doll-base'); const pelo = cont.querySelector('.maniqui-pelo'); cont.innerHTML = (base?base.outerHTML:'') + (pelo?pelo.outerHTML:'') + capasHtml(); }
   renderCapasLista();
   actualizarResumenOutfit();
 }
@@ -2753,13 +2768,13 @@ function moverCapaOutfit(id, delta){
   if(nuevo<0 || nuevo>=outfitBoard.capas.length) return;
   [outfitBoard.capas[idx], outfitBoard.capas[nuevo]] = [outfitBoard.capas[nuevo], outfitBoard.capas[idx]];
   const cont = document.getElementById('vestidorPreview');
-  if(cont){ const base = cont.querySelector('.maniqui-doll-base'); cont.innerHTML = (base?base.outerHTML:'') + capasHtml(); }
+  if(cont){ const base = cont.querySelector('.maniqui-doll-base'); const pelo = cont.querySelector('.maniqui-pelo'); cont.innerHTML = (base?base.outerHTML:'') + (pelo?pelo.outerHTML:'') + capasHtml(); }
   renderCapasLista();
 }
 function quitarCapaOutfit(id){
   outfitBoard.capas = outfitBoard.capas.filter(x=>x!==id);
   const cont = document.getElementById('vestidorPreview');
-  if(cont){ const base = cont.querySelector('.maniqui-doll-base'); cont.innerHTML = (base?base.outerHTML:'') + capasHtml(); }
+  if(cont){ const base = cont.querySelector('.maniqui-doll-base'); const pelo = cont.querySelector('.maniqui-pelo'); cont.innerHTML = (base?base.outerHTML:'') + (pelo?pelo.outerHTML:'') + capasHtml(); }
   renderCapasLista();
   actualizarResumenOutfit();
 }
@@ -2767,7 +2782,7 @@ function agregarCapaOutfit(id){
   if(!outfitBoard.capas.includes(id)) outfitBoard.capas.push(id);
   else outfitBoard.capas = outfitBoard.capas.filter(x=>x!==id);
   const cont = document.getElementById('vestidorPreview');
-  if(cont){ const base = cont.querySelector('.maniqui-doll-base'); cont.innerHTML = (base?base.outerHTML:'') + capasHtml(); }
+  if(cont){ const base = cont.querySelector('.maniqui-doll-base'); const pelo = cont.querySelector('.maniqui-pelo'); cont.innerHTML = (base?base.outerHTML:'') + (pelo?pelo.outerHTML:'') + capasHtml(); }
   renderCapasLista();
   actualizarResumenOutfit();
 }
@@ -2859,25 +2874,64 @@ async function mejorarOutfitConIA(prendaIds, areaId, btnId){
   const subGen = await apiPost('uploadImage', { imageBase64: r.imageBase64, mimeType: r.mimeType||'image/jpeg', fileName:'mejorado-'+Date.now()+'.jpg' });
   if(area) area.innerHTML = subGen.ok ? `<img src="${subGen.url}" onclick="verFotoGrande('${subGen.url}')" style="max-width:100%;border-radius:12px;margin-top:10px;cursor:zoom-in">` : '<p class="hint">No se pudo guardar la imagen generada.</p>';
 }
-// El maniquí base (genérico, sin ropa) se genera UNA vez por género +
-// estatura y se cachea en localStorage — es el lienzo canónico sobre el
-// que se componen las capas del Vestidor, las Ideas de abajo, y el
-// render de "✨ Mejorar con IA". La estatura se resuelve sola desde
-// localStorage si no se pasa explícita, así que los llamados existentes
-// (que solo mandan género) automáticamente usan la que esté elegida en
-// Perfil sin tener que tocar cada uno.
-async function obtenerManiquiBase(genero, estatura, peinado){
+// El maniquí base (genérico, sin ropa, SIN cabello) se genera UNA vez por
+// género+estatura y se cachea — es el lienzo canónico sobre el que se
+// componen las capas del Vestidor, las Ideas de abajo, y el render de
+// "✨ Mejorar con IA". La estatura se resuelve sola desde localStorage si
+// no se pasa explícita, así que los llamados existentes (que solo mandan
+// género) automáticamente usan la que esté elegida en Perfil.
+// El cabello YA NO es parte de esta generación (ver obtenerPeinadoManiqui)
+// — pedido explícito: antes cada combinación con peinado regeneraba el
+// cuerpo completo desde cero, y como la IA no es determinista, el cuerpo
+// mismo (piel, proporciones) salía distinto entre una pestaña y otra.
+// Ahora el cuerpo queda fijo una sola vez por género+estatura.
+async function obtenerManiquiBase(genero, estatura){
   estatura = estatura || localStorage.getItem('ropa_maniqui_estatura') || 'chaparrita';
-  peinado = peinado || localStorage.getItem('ropa_maniqui_peinado') || 'ninguno';
-  const cacheKey = 'ropa_maniqui_base_v3_'+genero+'_'+estatura+'_'+peinado;
+  const cacheKey = 'ropa_maniqui_base_v3_'+genero+'_'+estatura;
   const cached = localStorage.getItem(cacheKey);
   if(cached){ try{ return JSON.parse(cached); }catch(e){} }
-  const gen = await apiPost('generarManiquiBase', { genero, estatura, peinado });
+  const gen = await apiPost('generarManiquiBase', { genero, estatura });
   if(!gen.ok) return null;
-  const subida = await apiPost('uploadImage', { imageBase64: gen.imageBase64, mimeType: gen.mimeType||'image/jpeg', fileName:'maniqui-'+genero+'-'+estatura+'-'+peinado+'.jpg' });
+  const subida = await apiPost('uploadImage', { imageBase64: gen.imageBase64, mimeType: gen.mimeType||'image/jpeg', fileName:'maniqui-'+genero+'-'+estatura+'.jpg' });
   const info = { base64: gen.imageBase64, mimeType: gen.mimeType||'image/jpeg', url: subida.ok?subida.url:'' };
   try{ localStorage.setItem(cacheKey, JSON.stringify(info)); }catch(e){}
   return info;
+}
+// El cabello: un addon aparte, generado en imagen a imagen usando el
+// cuerpo YA fijo como referencia (para que encaje exacto en su cabeza),
+// pasado por el mismo quitado de fondo que las prendas — se cachea aparte
+// por género+estatura+peinado. Si el peinado es "ninguno" no genera nada.
+async function obtenerPeinadoManiqui(genero, estatura, peinado){
+  estatura = estatura || localStorage.getItem('ropa_maniqui_estatura') || 'chaparrita';
+  peinado = peinado || localStorage.getItem('ropa_maniqui_peinado') || 'ninguno';
+  if(peinado==='ninguno') return null;
+  const cacheKey = 'ropa_maniqui_peinado_v1_'+genero+'_'+estatura+'_'+peinado;
+  const cached = localStorage.getItem(cacheKey);
+  if(cached){ try{ return JSON.parse(cached); }catch(e){} }
+  const cuerpo = await obtenerManiquiBase(genero, estatura);
+  if(!cuerpo) return null;
+  const gen = await apiPost('generarPeinadoManiqui', { genero, estatura, peinado, maniquiBase64: cuerpo.base64, maniquiMimeType: cuerpo.mimeType });
+  if(!gen.ok) return null;
+  const recorte = await quitarFondoColor('data:'+(gen.mimeType||'image/jpeg')+';base64,'+gen.imageBase64, '#00FF00');
+  if(!capaEsValida(recorte)) return null;
+  const subida = await apiPost('uploadImage', { imageBase64: recorte.base64, mimeType:'image/png', fileName:'peinado-'+genero+'-'+estatura+'-'+peinado+'.png' });
+  if(!subida.ok) return null;
+  const info = { url: subida.url };
+  try{ localStorage.setItem(cacheKey, JSON.stringify(info)); }catch(e){}
+  return info;
+}
+// Helper compartido: el HTML del cuerpo + su cabello (si tiene) encima —
+// se usa en todos los lugares que muestran el maniquí (Ajustar, Vestidor,
+// editor de Moldes, Ideas) para que ninguno se quede mostrando solo el
+// cuerpo sin pelo por accidente.
+async function maniquiConPeinadoHtml(genero){
+  const [cuerpo, pelo] = await Promise.all([ obtenerManiquiBase(genero), obtenerPeinadoManiqui(genero) ]);
+  if(!cuerpo || !cuerpo.url) return { html:'', cuerpo:null };
+  // "maniqui-pelo" además de la clase visual — así se puede distinguir
+  // del resto de las capas (prendas reales) cuando se reusa el HTML ya
+  // renderizado sin volver a pedirlo (ver los querySelector('.maniqui-pelo')).
+  const html = `<img class="maniqui-doll-base" src="${cuerpo.url}">` + (pelo && pelo.url ? `<img class="maniqui-doll-capa-full maniqui-pelo" src="${pelo.url}">` : '');
+  return { html, cuerpo };
 }
 async function base64DeFotoURL(url){
   const fileId = fileIdDeUrlDrive(url);
@@ -3094,11 +3148,11 @@ async function abrirEditorMolde(clave){
   overlay.querySelector('#moldeCancelar').onclick = cerrar;
   overlay.querySelector('#moldeGuardar').onclick = guardarEditorMolde;
   const genero = localStorage.getItem('ropa_maniqui_genero')||'mujer';
-  const maniqui = await obtenerManiquiBase(genero);
+  const maniquiInfo = await maniquiConPeinadoHtml(genero);
   const wrap = document.getElementById('moldeWrap');
   if(!wrap) return;
-  if(!maniqui || !maniqui.url){ wrap.innerHTML = '<p class="hint">No se pudo cargar el maniquí.</p>'; return; }
-  wrap.innerHTML = `<img class="maniqui-doll-base" src="${maniqui.url}">` +
+  if(!maniquiInfo.cuerpo){ wrap.innerHTML = '<p class="hint">No se pudo cargar el maniquí.</p>'; return; }
+  wrap.innerHTML = maniquiInfo.html +
     (prendas.length ? `<img class="maniqui-doll-capa-full" id="moldeImg" src="${prendas[0].FotoGeneradaURL}" style="cursor:grab;touch-action:none;transform-origin:0 0">` : '') +
     `<div id="moldeGuia" style="position:absolute;border:2px dashed var(--accent);border-radius:6px;pointer-events:none;opacity:.75"></div>`;
   if(prendas.length>1){
@@ -3243,8 +3297,8 @@ async function refrescarVestidorManiqui(){
   const cont = document.getElementById('vestidorPreview');
   if(!cont) return;
   const genero = localStorage.getItem('ropa_maniqui_genero')||'mujer';
-  const maniqui = await obtenerManiquiBase(genero);
-  cont.innerHTML = (maniqui&&maniqui.url ? `<img class="maniqui-doll-base" src="${maniqui.url}">` : '') + capasHtml();
+  const maniquiInfo = await maniquiConPeinadoHtml(genero);
+  cont.innerHTML = maniquiInfo.html + capasHtml();
 }
 // El género elegido aquí decide qué maniquí base se usa en todo el
 // Vestidor (Ideas y, si hace falta regenerarlo, el armador). Se deja
