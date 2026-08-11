@@ -322,7 +322,7 @@ let SHEET_URL = '';
 // Nombre-landmark de esta versión — cámbialo en cada cambio que se
 // despliegue, así se puede saber a simple vista (en Perfil) si el
 // celular ya está viendo lo último o una copia vieja en caché.
-const BUILD_VERSION = 'Leon';
+const BUILD_VERSION = 'Merida2';
 let DATA = { prendas: [], usos: [], outfits_sugeridos: [], perfil: [], fotos_origen: [] };
 let showTrash = false;
 let soloFavoritos = false;
@@ -1946,13 +1946,16 @@ async function abrirBorrador(p){
       <button class="chip active" id="modoLibre">✏️ Trazo libre</button>
       <button class="chip" id="modoOvalo">⭕ Óvalo (curvas limpias)</button>
     </div>
-    <div class="checker-bg" style="max-width:280px;margin:10px auto 0;border-radius:10px;overflow:hidden">
-      <canvas id="borradorCanvas" style="width:100%;touch-action:none;display:block"></canvas>
+    <div style="max-width:280px;max-height:55vh;overflow:auto;margin:10px auto 0;border-radius:10px;border:1px solid var(--border)">
+      <div class="checker-bg" style="display:inline-block"><canvas id="borradorCanvas" style="touch-action:none;display:block"></canvas></div>
     </div>
-    <p class="hint" style="text-align:center;margin-top:8px" id="borradorGrosorTxt">Grosor del borrador</p>
-    <input type="range" id="borradorGrosor" min="4" max="60" value="20" style="width:100%">
+    <p class="hint" style="text-align:center;margin-top:8px">🔍 Zoom (para cortes finos)</p>
+    <input type="range" id="borradorZoom" min="100" max="500" value="100" style="width:100%">
+    <p class="hint" style="text-align:center;margin-top:8px">Grosor del borrador</p>
+    <input type="range" id="borradorGrosor" min="1" max="60" value="12" style="width:100%">
     <div class="chips" style="justify-content:center;margin-top:6px">
-      <button class="chip" id="borradorReiniciar">↺ Reiniciar</button>
+      <button class="chip" id="borradorDeshacer">↩ Deshacer trazo</button>
+      <button class="chip" id="borradorReiniciar">↺ Reiniciar todo</button>
     </div>
     <div class="actions">
       <button class="btn ghost" id="borradorCancelar">Cancelar</button>
@@ -1962,6 +1965,7 @@ async function abrirBorrador(p){
   document.body.appendChild(overlay);
   const canvas = document.getElementById('borradorCanvas');
   canvas.width = img.naturalWidth; canvas.height = img.naturalHeight;
+  canvas.style.width = '280px';
   const ctx = canvas.getContext('2d');
   ctx.drawImage(img, 0, 0);
   // buffer = el estado YA confirmado (sin la vista previa del óvalo encima)
@@ -1969,7 +1973,15 @@ async function abrirBorrador(p){
   buffer.width = canvas.width; buffer.height = canvas.height;
   const bctx = buffer.getContext('2d');
   bctx.drawImage(img, 0, 0);
-  let modoOvalo = false, grosor = 20, activo = false, inicio = null, ultimo = null;
+  // Pila de deshacer: una copia del buffer justo ANTES de cada trazo/óvalo
+  // confirmado — "Deshacer" solo repone la última, no borra todo de un jalón.
+  let historial = [];
+  const guardarHistorial = ()=>{
+    historial.push(bctx.getImageData(0,0,buffer.width,buffer.height));
+    if(historial.length>25) historial.shift();
+  };
+  let modoOvalo = false, grosor = 12, activo = false, inicio = null, ultimo = null;
+  document.getElementById('borradorZoom').oninput = e=>{ canvas.style.width = (280*Number(e.target.value)/100)+'px'; };
   document.getElementById('borradorGrosor').oninput = e=> grosor = Number(e.target.value);
   const btnLibre = document.getElementById('modoLibre'), btnOvalo = document.getElementById('modoOvalo');
   btnLibre.onclick = ()=>{ modoOvalo=false; btnLibre.classList.add('active'); btnOvalo.classList.remove('active'); };
@@ -1991,6 +2003,7 @@ async function abrirBorrador(p){
   canvas.addEventListener('pointerdown', e=>{
     activo = true; canvas.setPointerCapture(e.pointerId);
     inicio = posEnCanvas(e); ultimo = inicio;
+    guardarHistorial();
     if(!modoOvalo) borrarCirculo(bctx, inicio, grosor*escala());
     ctx.clearRect(0,0,canvas.width,canvas.height); ctx.drawImage(buffer,0,0);
   });
@@ -2019,7 +2032,13 @@ async function abrirBorrador(p){
     }
     ctx.clearRect(0,0,canvas.width,canvas.height); ctx.drawImage(buffer,0,0);
   });
+  document.getElementById('borradorDeshacer').onclick = ()=>{
+    if(!historial.length) return;
+    bctx.putImageData(historial.pop(), 0, 0);
+    ctx.clearRect(0,0,canvas.width,canvas.height); ctx.drawImage(buffer,0,0);
+  };
   document.getElementById('borradorReiniciar').onclick = ()=>{
+    historial = [];
     bctx.clearRect(0,0,canvas.width,canvas.height); bctx.drawImage(img,0,0);
     ctx.clearRect(0,0,canvas.width,canvas.height); ctx.drawImage(buffer,0,0);
   };
