@@ -274,6 +274,20 @@ nav.tabbar button .ic{font-size:19px}
       <p class="hint">Ponles fecha si sabes cuándo son (se ve igual en todas las prendas que salieron de esa foto) o elimínalas de tus prendas.</p>
       <div id="fotosSubidasArea"></div>
 
+      <h3 style="margin-top:26px">Versión</h3>
+      <p class="hint">🗺️ <span id="perfilVersionTexto"></span>
+        <button class="btn ghost" style="font-size:12px;padding:6px 10px;margin-left:8px" onclick="forceReloadApp()" title="Borra la copia guardada (caché) y vuelve a pedir todo desde internet — úsalo si crees que no estás viendo la versión más reciente">🔄 Forzar actualización</button>
+      </p>
+
+      <h3 style="margin-top:26px">Notas</h3>
+      <p class="hint">Se guardan solas mientras escribes.</p>
+      <textarea id="perfilNotas" rows="5" style="width:100%" oninput="onNotasInput()"></textarea>
+      <div style="display:flex;gap:8px;margin-top:6px;align-items:center;flex-wrap:wrap">
+        <button class="btn ghost" onclick="copiarNotas()">📋 Copiar</button>
+        <button class="btn ghost" onclick="limpiarNotas()">🗑 Limpiar</button>
+        <span class="hint" id="notasEstado"></span>
+      </div>
+
       <h3 style="margin-top:26px">Conexión</h3>
       <p class="hint" id="perfilConexionInfo"></p>
     </section>
@@ -297,6 +311,10 @@ nav.tabbar button .ic{font-size:19px}
 // ============================================================
 let GAS_URL = localStorage.getItem('ropa_gas_url') || '';
 let SHEET_URL = '';
+// Nombre-landmark de esta versión — cámbialo en cada cambio que se
+// despliegue, así se puede saber a simple vista (en Perfil) si el
+// celular ya está viendo lo último o una copia vieja en caché.
+const BUILD_VERSION = 'Tulum';
 let DATA = { prendas: [], usos: [], outfits_sugeridos: [], perfil: [], fotos_origen: [] };
 let showTrash = false;
 let soloFavoritos = false;
@@ -2206,6 +2224,8 @@ function renderPerfilScreen(){
   const genero = localStorage.getItem('ropa_maniqui_genero')||'mujer';
   document.getElementById('chipManiquiMujer').classList.toggle('active', genero==='mujer');
   document.getElementById('chipManiquiHombre').classList.toggle('active', genero==='hombre');
+  document.getElementById('perfilVersionTexto').textContent = BUILD_VERSION;
+  document.getElementById('perfilNotas').value = p.Notas || '';
   renderFotosSubidas();
 }
 // El género elegido aquí decide qué maniquí base se usa en todo el
@@ -2289,18 +2309,77 @@ function pedirEliminarFotoOrigen(url){
   });
 }
 async function guardarPerfil(){
+  const idx = DATA.perfil.findIndex(x=>x.ID===PERFIL_ID);
   const row = {
     ID: PERFIL_ID,
     TonoPiel: document.getElementById('perfilTono').value,
     Subtono: document.getElementById('perfilSubtono').value,
     Ciudad: document.getElementById('perfilCiudad').value,
-    Nombre: ''
+    Nombre: '',
+    Notas: idx>=0 ? (DATA.perfil[idx].Notas||'') : '' // este botón no toca las notas, se guardan solas
   };
-  const idx = DATA.perfil.findIndex(x=>x.ID===PERFIL_ID);
   if(idx>=0) DATA.perfil[idx] = row; else DATA.perfil.push(row);
   localStorage.setItem('ropa_data_cache', JSON.stringify(DATA));
   await apiPost('saveRow', { table:'PERFIL', row });
   showToast('Perfil guardado');
+}
+// Notas libres en Perfil: se guardan solas 800ms después de dejar de
+// escribir (debounce, no en cada tecla) tanto en localStorage (al
+// instante, para que sobrevivan un refresh) como en el Sheet (para que
+// sobrevivan cambiar de celular/navegador) — con estado visible
+// ("Guardando…"/"Guardado ✓") para que quede claro que sí se guardó.
+let notasGuardarTimer = null;
+function onNotasInput(){
+  const estado = document.getElementById('notasEstado');
+  if(estado) estado.textContent = 'Escribiendo…';
+  clearTimeout(notasGuardarTimer);
+  notasGuardarTimer = setTimeout(guardarNotasPerfil, 800);
+}
+async function guardarNotasPerfil(){
+  const ta = document.getElementById('perfilNotas');
+  if(!ta) return;
+  const val = ta.value;
+  const idx = DATA.perfil.findIndex(x=>x.ID===PERFIL_ID);
+  const row = idx>=0 ? { ...DATA.perfil[idx], Notas: val } : { ID: PERFIL_ID, TonoPiel:'', Subtono:'', Ciudad:'', Nombre:'', Notas: val };
+  if(idx>=0) DATA.perfil[idx] = row; else DATA.perfil.push(row);
+  localStorage.setItem('ropa_data_cache', JSON.stringify(DATA));
+  const estado = document.getElementById('notasEstado');
+  if(estado) estado.textContent = 'Guardando…';
+  const r = await apiPost('saveRow', { table:'PERFIL', row });
+  if(!estado) return;
+  estado.textContent = r.ok ? 'Guardado ✓' : '⚠️ No se pudo guardar (sin conexión) — se reintenta con el próximo cambio';
+  if(r.ok) setTimeout(()=>{ if(estado.textContent==='Guardado ✓') estado.textContent=''; }, 2000);
+}
+function copiarNotas(){
+  const ta = document.getElementById('perfilNotas');
+  if(!ta) return;
+  navigator.clipboard.writeText(ta.value).then(()=> showToast('Notas copiadas')).catch(()=> showToast('No se pudo copiar'));
+}
+function limpiarNotas(){
+  const ta = document.getElementById('perfilNotas');
+  if(!ta || !ta.value.trim()){ showToast('No hay notas que borrar'); return; }
+  confirmarEliminar('Se van a borrar todas las notas — no se puede deshacer.', ()=>{
+    ta.value = '';
+    guardarNotasPerfil();
+    showToast('Notas borradas');
+  });
+}
+// Fuerza que se vuelva a pedir el HTML/JS de la app (no los datos) por si
+// el navegador se quedó con una copia vieja: borra el caché del service
+// worker, lo da de baja, y navega con un parámetro nuevo para que ni el
+// caché HTTP del navegador conteste con algo guardado.
+async function forceReloadApp(){
+  try{
+    if('caches' in window){
+      const nombres = await caches.keys();
+      await Promise.all(nombres.map(n=>caches.delete(n)));
+    }
+    if('serviceWorker' in navigator){
+      const regs = await navigator.serviceWorker.getRegistrations();
+      await Promise.all(regs.map(r=>r.unregister()));
+    }
+  } catch(e){}
+  location.href = location.pathname + '?_r=' + Date.now();
 }
 async function onFotoPerfilSeleccionada(fileList){
   if(!fileList.length) return;
