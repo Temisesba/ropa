@@ -117,6 +117,9 @@ nav.tabbar button .ic{font-size:19px}
 .maniqui-doll-wrap{position:relative;max-width:280px;aspect-ratio:9/16;margin:10px auto 0;background:var(--bg-card);border-radius:var(--radius);box-shadow:var(--shadow);overflow:hidden}
 .maniqui-doll-base{position:absolute;inset:0;width:100%;height:100%;object-fit:contain;z-index:0}
 .maniqui-doll-capa-full{position:absolute;inset:0;width:100%;height:100%;object-fit:contain;cursor:zoom-in}
+.maniqui-arrow{position:absolute;transform:translateY(-50%);width:30px;height:30px;border-radius:50%;background:var(--bg-card);border:1px solid var(--border);font-size:16px;z-index:6;box-shadow:var(--shadow);opacity:.92}
+.maniqui-arrow.left{left:4px}
+.maniqui-arrow.right{right:4px}
 .capa-row{display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid var(--border)}
 .capa-row:last-child{border-bottom:none}
 .capa-row-info{flex:1;font-size:13px}
@@ -2028,11 +2031,23 @@ async function renderVestidorPreview(){
 // ponerla encima del maniquí se vería como una foto pegada, no una
 // prenda puesta. Si no hay capa, esa prenda simplemente no se dibuja
 // (ver renderCapasLista para el aviso).
+// Flechas pegadas al maniquí, a la altura real de cada prenda (centro
+// vertical de su BBoxJSON) — pedido explícito: swipear directo sobre la
+// prenda que se ve puesta, no solo desde la lista de abajo. Solo se
+// muestran si esa categoría tiene más de una prenda entre las que elegir.
 function capasHtml(){
   return outfitBoard.capas.map(id=>{
     const p = findPrenda(id);
     if(!p || !p.FotoGeneradaURL) return '';
-    return `<img class="maniqui-doll-capa-full" src="${p.FotoGeneradaURL}" onclick="verFotoGrande('${p.FotoGeneradaURL}')">`;
+    let flechas = '';
+    if(itemsPorCategoria(p.Categoria).length>1){
+      let bbox = null;
+      if(p.BBoxJSON){ try{ bbox = JSON.parse(p.BBoxJSON); }catch(e){} }
+      const topPct = bbox ? (bbox.y + bbox.h/2) : 50;
+      flechas = `<button class="maniqui-arrow left" style="top:${topPct}%" onclick="cambiarPrendaCarrusel('${p.ID}',-1)" title="Prenda anterior de ${escAttr(p.Categoria)}">‹</button>` +
+        `<button class="maniqui-arrow right" style="top:${topPct}%" onclick="cambiarPrendaCarrusel('${p.ID}',1)" title="Siguiente prenda de ${escAttr(p.Categoria)}">›</button>`;
+    }
+    return `<img class="maniqui-doll-capa-full" src="${p.FotoGeneradaURL}" onclick="verFotoGrande('${p.FotoGeneradaURL}')">${flechas}`;
   }).join('');
 }
 function renderCapasLista(){
@@ -2046,18 +2061,9 @@ function renderCapasLista(){
       const esUltimo = idx === outfitBoard.capas.length-1;
       const esPrimero = idx === 0;
       const sinCapa = !p.FotoGeneradaURL;
-      const opciones = itemsPorCategoria(p.Categoria);
-      const hayVarias = opciones.length>1;
       return `<div class="capa-row" style="flex-wrap:wrap">
         ${fotoRecortadaHtml(p,{estilo:'height:44px;flex:none;border-radius:8px', clickable:false})}
-        <div class="capa-row-info">
-          <div style="display:flex;align-items:center;gap:6px">
-            ${hayVarias?`<button class="btn ghost" style="padding:2px 8px;font-size:14px" onclick="cambiarPrendaCarrusel('${p.ID}',-1)" title="Prenda anterior de ${escAttr(p.Categoria)}">‹</button>`:''}
-            <span>${escAttr(p.Tipo||p.Categoria)}</span>
-            ${hayVarias?`<button class="btn ghost" style="padding:2px 8px;font-size:14px" onclick="cambiarPrendaCarrusel('${p.ID}',1)" title="Siguiente prenda de ${escAttr(p.Categoria)}">›</button>`:''}
-          </div>
-          ${sinCapa?`<span class="hint" style="color:var(--accent)">⚠️ Todavía no tiene capa para el Vestidor (no se dibuja sobre el maniquí). <a href="javascript:void(0)" onclick="abrirEditarPrenda('${p.ID}')">Regenerar</a></span>`:''}
-        </div>
+        <div class="capa-row-info">${escAttr(p.Tipo||p.Categoria)}${sinCapa?`<br><span class="hint" style="color:var(--accent)">⚠️ Todavía no tiene capa para el Vestidor (no se dibuja sobre el maniquí). <a href="javascript:void(0)" onclick="abrirEditarPrenda('${p.ID}')">Regenerar</a></span>`:''}</div>
         <button class="btn ghost" style="padding:4px 8px" ${esUltimo?'disabled':''} onclick="moverCapaOutfit('${p.ID}',1)" title="Más encima">▲</button>
         <button class="btn ghost" style="padding:4px 8px" ${esPrimero?'disabled':''} onclick="moverCapaOutfit('${p.ID}',-1)" title="Más abajo">▼</button>
         <button class="remove" onclick="quitarCapaOutfit('${p.ID}')" title="Quitar del outfit">🗑</button>
