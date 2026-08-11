@@ -321,7 +321,7 @@ let SHEET_URL = '';
 // Nombre-landmark de esta versión — cámbialo en cada cambio que se
 // despliegue, así se puede saber a simple vista (en Perfil) si el
 // celular ya está viendo lo último o una copia vieja en caché.
-const BUILD_VERSION = 'Fresnillo';
+const BUILD_VERSION = 'Guanajuato';
 let DATA = { prendas: [], usos: [], outfits_sugeridos: [], perfil: [], fotos_origen: [] };
 let showTrash = false;
 let soloFavoritos = false;
@@ -2514,12 +2514,19 @@ function renderMoldes(){
         const r = reglaMolde(m.clave);
         const n = prendasDelMolde(m.clave).length;
         const tocado = moldeEstaAjustado(m.clave);
+        // Ajustar y guardar un molde solo cambia la REGLA a futuro — las
+        // prendas que ya existían se quedan con la posición vieja hasta
+        // que se re-alinean explícitamente. El botón de re-alinear solo
+        // aparecía justo después de guardar en el editor; si el usuario
+        // cerraba el editor sin fijarse, no había otra forma de volver a
+        // dispararlo — se deja siempre visible aquí para eso.
         return `<div class="capa-row" style="flex-wrap:wrap;gap:6px">
           <div class="capa-row-info">
             <b>${escAttr(m.nombre)}</b>${tocado?' <span style="color:var(--accent)">✎ ajustado</span>':''}
             <br><span class="hint">ancho ${r.ancho}% · ${r.vAlign==='bottom'?'pies en':'arriba en'} ${r.anclaY}% · ${n} prenda(s)</span>
           </div>
           <button class="btn ghost" style="font-size:12px;padding:6px 10px" onclick="abrirEditorMolde('${m.clave}')">📐 Ajustar</button>
+          ${n?`<button class="btn ghost" style="font-size:12px;padding:6px 10px" id="reaplicar-${m.clave}" onclick="reaplicarMoldeATipo('${m.clave}','reaplicar-${m.clave}')">🔁 Re-alinear (${n})</button>`:''}
           ${tocado?`<button class="btn ghost" style="font-size:12px;padding:6px 10px" onclick="resetMolde('${m.clave}')">↺</button>`:''}
         </div>`;
       }).join('') + `</div>`
@@ -2674,7 +2681,7 @@ function guardarEditorMolde(){
   if(area && prendas.length){
     area.innerHTML = `✅ Molde guardado — de aquí en adelante toda prenda nueva de este tipo cae aquí sola.<br>
       <button class="btn secondary" style="margin-top:8px" id="moldeReaplicarBtn">📐 Re-alinear mis ${prendas.length} prenda(s) de este tipo</button>`;
-    document.getElementById('moldeReaplicarBtn').onclick = ()=> reaplicarMoldeATipo(clave);
+    document.getElementById('moldeReaplicarBtn').onclick = ()=> reaplicarMoldeATipo(clave, 'moldeReaplicarBtn');
   } else if(area){
     area.innerHTML = '✅ Molde guardado.';
   }
@@ -2683,10 +2690,11 @@ function guardarEditorMolde(){
 // Re-alinear todo un tipo de golpe: no vuelve a generar nada con IA, solo
 // reacomoda las capas que ya existen — por eso es barato y se puede
 // repetir las veces que haga falta hasta que el molde quede perfecto.
-async function reaplicarMoldeATipo(clave){
+async function reaplicarMoldeATipo(clave, btnId){
   const lista = prendasDelMolde(clave);
   if(!lista.length) return;
-  const btn = document.getElementById('moldeReaplicarBtn');
+  const btn = document.getElementById(btnId||'moldeReaplicarBtn');
+  const textoOriginal = btn ? btn.textContent : '';
   const regla = reglaMolde(clave);
   let ok = 0;
   for(let i=0;i<lista.length;i++){
@@ -2695,7 +2703,8 @@ async function reaplicarMoldeATipo(clave){
   }
   localStorage.setItem('ropa_data_cache', JSON.stringify(DATA));
   renderCatalogo();
-  if(btn){ btn.disabled = false; btn.textContent = `📐 Re-alinear mis ${lista.length} prenda(s) de este tipo`; }
+  if(btn){ btn.disabled = false; btn.textContent = textoOriginal; }
+  renderMoldes();
   showToast(ok===lista.length ? `Listo: ${ok} prenda(s) en el molde` : `${ok} de ${lista.length} re-alineadas (revisa la conexión)`);
 }
 // El género elegido aquí decide qué maniquí base se usa en todo el
