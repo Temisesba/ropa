@@ -321,7 +321,7 @@ let SHEET_URL = '';
 // Nombre-landmark de esta versión — cámbialo en cada cambio que se
 // despliegue, así se puede saber a simple vista (en Perfil) si el
 // celular ya está viendo lo último o una copia vieja en caché.
-const BUILD_VERSION = 'Guanajuato';
+const BUILD_VERSION = 'Hermosillo';
 let DATA = { prendas: [], usos: [], outfits_sugeridos: [], perfil: [], fotos_origen: [] };
 let showTrash = false;
 let soloFavoritos = false;
@@ -1020,19 +1020,20 @@ function quitarFondoColor(dataUrl, claveHex, tolerancia){
       // quedó sin quitar): un pixel totalmente opaco que sigue bastante
       // cerca del color clave es una señal de que el recorte falló ahí,
       // aunque no haya entrado en el rango que sí se convierte en alfa.
-      const tolAmplia2 = tol2*6;
+      const tolAmplia2 = tol2*9;
       let minX=canvas.width, minY=canvas.height, maxX=0, maxY=0, removidos=0, claveResidual=0;
       for(let i=0;i<d.length;i+=4){
         const r=d[i], g=d[i+1], b=d[i+2];
         const dist2 = (r-key.r)*(r-key.r) + (g-key.g)*(g-key.g) + (b-key.b)*(b-key.b);
         if(dist2 < tol2){
           d[i+3] = 0; removidos++;
-        } else if(dist2 < tol2*4){
-          // Zona de transición más ancha que antes (era *2.5) — un borde
-          // más gradual disimula mejor el halo de color filtrado que
-          // quedaba visible en los bordes (reportado: fleco verde en
-          // tenis/pantalón) que un corte más abrupto.
-          const factor = (dist2-tol2)/(tol2*3);
+        } else if(dist2 < tol2*6){
+          // Zona de transición más ancha que antes (era *4, y *2.5 antes de
+          // eso) — reportado otra vez: en prendas claras/blancas (tenis
+          // blancos) el borde difuminado por la IA contra el color clave
+          // queda más ancho de lo normal, y un umbral angosto deja un
+          // fleco de color sin limpiar del todo.
+          const factor = (dist2-tol2)/(tol2*5);
           d[i+3] = Math.round(255*factor);
           if(key.g>=key.r && key.g>=key.b) d[i+1] = Math.min(d[i+1], Math.max(r,b));
           else if(key.b>=key.r && key.b>=key.g) d[i+2] = Math.min(d[i+2], Math.max(r,g));
@@ -1977,6 +1978,9 @@ async function guardarAjusteManiqui(){
   localStorage.setItem('ropa_data_cache', JSON.stringify(DATA));
   renderCatalogo();
   refrescarFotoModal(p);
+  const vestidorCont = document.getElementById('vestidorPreview');
+  if(vestidorCont){ const base = vestidorCont.querySelector('.maniqui-doll-base'); vestidorCont.innerHTML = (base?base.outerHTML:'') + capasHtml(); }
+  renderCapasLista();
   const overlay = document.getElementById('ajustarManiquiOverlay');
   if(overlay) overlay.remove();
   ajusteManiqui = null;
@@ -2286,6 +2290,7 @@ function renderCapasLista(){
         <div class="capa-row-info">${escAttr(p.Tipo||p.Categoria)}${sinCapa?`<br><span class="hint" style="color:var(--accent)">⚠️ Todavía no tiene capa para el Vestidor (no se dibuja sobre el maniquí). <a href="javascript:void(0)" onclick="abrirEditarPrenda('${p.ID}')">Regenerar</a></span>`:''}</div>
         ${otras?`<button class="btn ghost" style="padding:4px 8px" onclick="cambiarPrendaCarrusel('${p.ID}',-1)" title="Prenda anterior de ${escAttr(p.Categoria)}">‹</button>
         <button class="btn ghost" style="padding:4px 8px" onclick="cambiarPrendaCarrusel('${p.ID}',1)" title="Siguiente prenda de ${escAttr(p.Categoria)}">›</button>`:''}
+        ${!sinCapa?`<button class="btn ghost" style="padding:4px 8px" onclick="abrirAjustarManiqui(findPrenda('${p.ID}'))" title="Ajustar solo esta prenda (posición/tamaño)">✋</button>`:''}
         <button class="btn ghost" style="padding:4px 8px" ${esUltimo?'disabled':''} onclick="moverCapaOutfit('${p.ID}',1)" title="Más encima">▲</button>
         <button class="btn ghost" style="padding:4px 8px" ${esPrimero?'disabled':''} onclick="moverCapaOutfit('${p.ID}',-1)" title="Más abajo">▼</button>
         <button class="remove" onclick="quitarCapaOutfit('${p.ID}')" title="Quitar del outfit">🗑</button>
