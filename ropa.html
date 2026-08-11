@@ -338,7 +338,7 @@ let SHEET_URL = '';
 // Nombre-landmark de esta versión — cámbialo en cada cambio que se
 // despliegue, así se puede saber a simple vista (en Perfil) si el
 // celular ya está viendo lo último o una copia vieja en caché.
-const BUILD_VERSION = 'Saltillo';
+const BUILD_VERSION = 'Tepic';
 let DATA = { prendas: [], usos: [], outfits_sugeridos: [], perfil: [], fotos_origen: [] };
 let showTrash = false;
 let soloFavoritos = false;
@@ -1738,6 +1738,7 @@ function abrirEditarPrenda(id){
     <div class="field"><label>Notas</label><textarea id="edNotas" rows="2">${escAttr(p.Notas||'')}</textarea></div>
     <div class="field"><label>Historial de uso ${Number(p.VecesUsado)?`(${Number(p.VecesUsado)} veces)`:''}</label>${historialUsoHtml(p)}</div>
     <div class="actions">
+      <button class="remove" id="edEliminar">🗑 Eliminar</button>
       <button class="btn ghost" id="edCancel">Cancelar</button>
       <button class="btn" id="edGuardar">Guardar</button>
     </div>
@@ -1745,6 +1746,7 @@ function abrirEditarPrenda(id){
   document.body.appendChild(overlay);
   overlay.addEventListener('click', e=>{ if(e.target===overlay) overlay.remove(); });
   overlay.querySelector('#edCancel').onclick = ()=> overlay.remove();
+  overlay.querySelector('#edEliminar').onclick = ()=>{ overlay.remove(); pedirEliminarPrenda(p.ID); };
   cablearBotonesFoto(p);
   document.getElementById('edMarcarZona').onclick = ()=> abrirMarcarZona(p);
   actualizarEstadoMarca(p);
