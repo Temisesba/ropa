@@ -321,7 +321,7 @@ let SHEET_URL = '';
 // Nombre-landmark de esta versión — cámbialo en cada cambio que se
 // despliegue, así se puede saber a simple vista (en Perfil) si el
 // celular ya está viendo lo último o una copia vieja en caché.
-const BUILD_VERSION = 'Durango';
+const BUILD_VERSION = 'Ensenada';
 let DATA = { prendas: [], usos: [], outfits_sugeridos: [], perfil: [], fotos_origen: [] };
 let showTrash = false;
 let soloFavoritos = false;
@@ -874,7 +874,7 @@ const MOLDES_BASE = [
   { clave:'zapatos',      nombre:'Zapatos / tacones',    grupo:'Calzado',     patrones:['zapato','tacon','mocasin','balerina','flat','zapatilla'],                        regla:{ ancho:30, vAlign:'bottom', anclaY:93.0, xCentro:50 } },
   // Accesorios
   { clave:'gorro',        nombre:'Gorro / gorra / sombrero', grupo:'Accesorios', patrones:['sombrero','gorra','gorro','boina','beanie'],                                  regla:{ ancho:32, vAlign:'top', anclaY:4.0,  xCentro:50 } },
-  { clave:'lentes',       nombre:'Lentes',               grupo:'Accesorios',  patrones:['lente','gafas','anteojo'],                                                      regla:{ ancho:26, vAlign:'top', anclaY:10.0, xCentro:50 } },
+  { clave:'lentes',       nombre:'Lentes',               grupo:'Accesorios',  patrones:['lente','gafas','anteojo'],                                                      regla:{ ancho:26, vAlign:'top', anclaY:14.0, xCentro:50 } },
   { clave:'aretes',       nombre:'Aretes',               grupo:'Accesorios',  patrones:['arete','pendiente'],                                                            regla:{ ancho:8,  vAlign:'top', anclaY:10.0, xCentro:50 } },
   { clave:'bufanda',      nombre:'Bufanda / pañuelo',    grupo:'Accesorios',  patrones:['bufanda','panuelo','mascada','chalina'],                                        regla:{ ancho:26, vAlign:'top', anclaY:16.0, xCentro:50 } },
   { clave:'collar',       nombre:'Collar',               grupo:'Accesorios',  patrones:['collar','gargantilla','cadena'],                                                regla:{ ancho:18, vAlign:'top', anclaY:16.5, xCentro:50 } },
@@ -2435,7 +2435,7 @@ async function mejorarOutfitConIA(prendaIds, areaId, btnId){
 // componen las capas del Vestidor, las Ideas de abajo, y el render de
 // "✨ Mejorar con IA".
 async function obtenerManiquiBase(genero){
-  const cacheKey = 'ropa_maniqui_base_v2_'+genero;
+  const cacheKey = 'ropa_maniqui_base_v3_'+genero;
   const cached = localStorage.getItem(cacheKey);
   if(cached){ try{ return JSON.parse(cached); }catch(e){} }
   const gen = await apiPost('generarManiquiBase', { genero });
