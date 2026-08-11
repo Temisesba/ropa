@@ -669,22 +669,46 @@ function renderRevisionFoto(){
   let cardsHtml = '';
   d.items.forEach((it, i)=>{
     const candidatos = candidatosParaPrenda(it.categoria);
-    if(it.matchId===undefined){
+    // it.matchSugerido: lo que adivina el heurístico (cacheado, no se
+    // recalcula). it.matchId: lo que el usuario CONFIRMÓ de verdad — solo
+    // se llena con una acción deliberada (tocar "Sí, ya la tengo",
+    // "Revisar catálogo" o "es nueva"). Mientras no haya confirmación,
+    // cuenta como nueva al guardar — antes se autoaceptaba la sugerencia
+    // sin que el usuario hiciera nada, y prendas nuevas terminaban
+    // registrándose como uso de otra cosa en vez de crearse.
+    if(it.matchSugerido===undefined){
       const sugerido = mejorCandidato(it, candidatos);
-      it.matchId = sugerido ? sugerido.ID : null;
+      it.matchSugerido = sugerido ? sugerido.ID : null;
     }
-    const prendaSugerida = it.matchId ? DATA.prendas.find(p=>p.ID===it.matchId) : null;
-    const estadoMatchHtml = prendaSugerida
-      ? `<div style="display:flex;align-items:center;gap:8px;margin-top:6px;padding:8px;background:var(--accent-soft);border-radius:10px">
-           ${prendaSugerida.FotoURL?fotoRecortadaHtml(prendaSugerida,{estilo:'height:40px;flex:none;border-radius:8px'}):''}
-           <div style="flex:1;font-size:12px">🔁 Ya está en tu catálogo: <b>${escAttr(prendaSugerida.Tipo||prendaSugerida.Categoria)}</b><br><span class="hint">toca la foto para confirmar — se suma a "veces usada", no se duplica</span></div>
-         </div>`
-      : `<p class="hint" style="margin-top:6px">✨ Se guardará como prenda nueva en tu catálogo.</p>`;
+    const confirmado = it.matchId !== undefined;
+    const prendaConfirmada = confirmado && it.matchId ? DATA.prendas.find(p=>p.ID===it.matchId) : null;
+    const prendaSugerida = (!confirmado && it.matchSugerido) ? DATA.prendas.find(p=>p.ID===it.matchSugerido) : null;
+    let estadoMatchHtml;
+    if(prendaConfirmada){
+      estadoMatchHtml = `<div style="display:flex;align-items:center;gap:8px;margin-top:6px;padding:8px;background:var(--accent-soft);border-radius:10px">
+           ${fotoRecortadaHtml(prendaConfirmada,{estilo:'height:40px;flex:none;border-radius:8px', clickable:false})}
+           <div style="flex:1;font-size:12px">✅ Confirmado, ya la tienes: <b>${escAttr(prendaConfirmada.Tipo||prendaConfirmada.Categoria)}</b></div>
+           <a href="javascript:void(0)" onclick="currentDetections.items[${i}].matchId=undefined;renderRevisionFoto()" style="font-size:12px">deshacer</a>
+         </div>`;
+    } else if(prendaSugerida){
+      estadoMatchHtml = `<div style="margin-top:6px;padding:8px;background:var(--accent-soft);border-radius:10px">
+           <div style="display:flex;align-items:center;gap:8px">
+             ${fotoRecortadaHtml(prendaSugerida,{estilo:'height:40px;flex:none;border-radius:8px', clickable:false})}
+             <div style="flex:1;font-size:12px">🔁 ¿Ya tienes esta? <b>${escAttr(prendaSugerida.Tipo||prendaSugerida.Categoria)}</b></div>
+           </div>
+           <div style="display:flex;gap:6px;margin-top:6px">
+             <button class="btn secondary" style="font-size:12px;padding:5px 8px;flex:1" onclick="seleccionarCandidatoSubir(${i}, currentDetections.items[${i}].matchSugerido)">Sí, ya la tengo</button>
+             <button class="btn ghost" style="font-size:12px;padding:5px 8px;flex:1" onclick="seleccionarCandidatoSubir(${i}, null)">✨ No, es nueva</button>
+           </div>
+         </div>`;
+    } else {
+      estadoMatchHtml = `<p class="hint" style="margin-top:6px">✨ Se guardará como prenda nueva en tu catálogo.</p>`;
+    }
     cardsHtml += `<div class="detect-card" id="detect-${i}" style="flex-direction:column;align-items:stretch">
       <div style="display:flex;gap:10px">
         <img src="${it.cropPreview||d.dataUrl}" alt="">
         <div class="fields">
-          <select onchange="currentDetections.items[${i}].categoria=this.value;currentDetections.items[${i}].matchId=undefined;renderRevisionFoto()">${CATEGORIAS.map(c=>`<option ${c===it.categoria?'selected':''}>${c}</option>`).join('')}</select>
+          <select onchange="currentDetections.items[${i}].categoria=this.value;currentDetections.items[${i}].matchId=undefined;currentDetections.items[${i}].matchSugerido=undefined;renderRevisionFoto()">${CATEGORIAS.map(c=>`<option ${c===it.categoria?'selected':''}>${c}</option>`).join('')}</select>
           <input value="${escAttr(it.tipo||'')}" placeholder="Tipo" oninput="currentDetections.items[${i}].tipo=this.value">
           <input value="${escAttr(it.color||'')}" placeholder="Color" oninput="currentDetections.items[${i}].color=this.value">
           <input value="${escAttr(it.colorSecundario||'')}" placeholder="Color secundario" oninput="currentDetections.items[${i}].colorSecundario=this.value">
@@ -693,7 +717,7 @@ function renderRevisionFoto(){
         <button class="remove" onclick="quitarDeteccion(${i})" title="No incluir esta prenda">✕</button>
       </div>
       ${estadoMatchHtml}
-      <button class="btn ghost" style="margin-top:6px;font-size:12px;padding:6px 10px" onclick="abrirRevisarCategoriaSubir(${i})">🔍 ${prendaSugerida?'No es esta, revisar':'Revisar'} catálogo de ${escAttr(it.categoria)} (${candidatos.length})</button>
+      <button class="btn ghost" style="margin-top:6px;font-size:12px;padding:6px 10px" onclick="abrirRevisarCategoriaSubir(${i})">🔍 ${prendaConfirmada?'Cambiar':'Revisar'} catálogo de ${escAttr(it.categoria)} (${candidatos.length})</button>
     </div>`;
   });
   const badgeModelo = d.modelo ? `<span class="chip" style="cursor:default">🤖 ${mensajeModelo(d,'Analizado')}</span>` : '';
@@ -1194,22 +1218,42 @@ function renderRevisionHoy(){
   let cardsHtml = '';
   d.items.forEach((it, i)=>{
     const candidatos = candidatosParaPrenda(it.categoria);
-    if(it.matchId===undefined){
+    // Mismo criterio que Subir fotos: la sugerencia (matchSugerido) no se
+    // acepta sola — hace falta una acción deliberada del usuario para que
+    // cuente como duplicado (matchId confirmado); si no, se guarda nueva.
+    if(it.matchSugerido===undefined){
       const sugerido = mejorCandidato(it, candidatos);
-      it.matchId = sugerido ? sugerido.ID : null;
+      it.matchSugerido = sugerido ? sugerido.ID : null;
     }
-    const prendaSugerida = it.matchId ? DATA.prendas.find(p=>p.ID===it.matchId) : null;
-    const estadoMatchHtml = prendaSugerida
-      ? `<div style="display:flex;align-items:center;gap:8px;margin-top:8px;padding:8px;background:var(--accent-soft);border-radius:10px">
-           ${prendaSugerida.FotoURL?fotoRecortadaHtml(prendaSugerida,{estilo:'height:44px;flex:none;border-radius:8px'}):''}
-           <div style="flex:1;font-size:13px">🔁 Ya la tienes: <b>${escAttr(prendaSugerida.Tipo||prendaSugerida.Categoria)}</b>, ${escAttr(prendaSugerida.Color||'')}<br><span class="hint">toca la foto para confirmar — se va a registrar el uso sobre esta prenda, no una nueva</span></div>
-         </div>`
-      : `<p class="hint" style="margin-top:8px">✨ Se guardará como <b>prenda nueva</b> (no encontramos ninguna parecida).</p>`;
+    const confirmado = it.matchId !== undefined;
+    const prendaConfirmada = confirmado && it.matchId ? DATA.prendas.find(p=>p.ID===it.matchId) : null;
+    const prendaSugerida = (!confirmado && it.matchSugerido) ? DATA.prendas.find(p=>p.ID===it.matchSugerido) : null;
+    let estadoMatchHtml;
+    if(prendaConfirmada){
+      estadoMatchHtml = `<div style="display:flex;align-items:center;gap:8px;margin-top:8px;padding:8px;background:var(--accent-soft);border-radius:10px">
+           ${fotoRecortadaHtml(prendaConfirmada,{estilo:'height:44px;flex:none;border-radius:8px', clickable:false})}
+           <div style="flex:1;font-size:13px">✅ Confirmado, ya la tienes: <b>${escAttr(prendaConfirmada.Tipo||prendaConfirmada.Categoria)}</b>, ${escAttr(prendaConfirmada.Color||'')}</div>
+           <a href="javascript:void(0)" onclick="hoyDetections.items[${i}].matchId=undefined;renderRevisionHoy()" style="font-size:12px">deshacer</a>
+         </div>`;
+    } else if(prendaSugerida){
+      estadoMatchHtml = `<div style="margin-top:8px;padding:8px;background:var(--accent-soft);border-radius:10px">
+           <div style="display:flex;align-items:center;gap:8px">
+             ${fotoRecortadaHtml(prendaSugerida,{estilo:'height:44px;flex:none;border-radius:8px', clickable:false})}
+             <div style="flex:1;font-size:13px">🔁 ¿Ya tienes esta? <b>${escAttr(prendaSugerida.Tipo||prendaSugerida.Categoria)}</b>, ${escAttr(prendaSugerida.Color||'')}</div>
+           </div>
+           <div style="display:flex;gap:6px;margin-top:6px">
+             <button class="btn secondary" style="font-size:12px;padding:5px 8px;flex:1" onclick="seleccionarCandidatoHoy(${i}, hoyDetections.items[${i}].matchSugerido)">Sí, ya la tengo</button>
+             <button class="btn ghost" style="font-size:12px;padding:5px 8px;flex:1" onclick="seleccionarCandidatoHoy(${i}, null)">✨ No, es nueva</button>
+           </div>
+         </div>`;
+    } else {
+      estadoMatchHtml = `<p class="hint" style="margin-top:8px">✨ Se guardará como <b>prenda nueva</b> (no encontramos ninguna parecida).</p>`;
+    }
     cardsHtml += `<div class="detect-card" id="detecthoy-${i}" style="flex-direction:column;align-items:stretch">
       <div style="display:flex;gap:10px">
         <img src="${it.cropPreview||d.dataUrl}" alt="">
         <div class="fields">
-          <select onchange="hoyDetections.items[${i}].categoria=this.value;hoyDetections.items[${i}].matchId=undefined;renderRevisionHoy()">${CATEGORIAS.map(c=>`<option ${c===it.categoria?'selected':''}>${c}</option>`).join('')}</select>
+          <select onchange="hoyDetections.items[${i}].categoria=this.value;hoyDetections.items[${i}].matchId=undefined;hoyDetections.items[${i}].matchSugerido=undefined;renderRevisionHoy()">${CATEGORIAS.map(c=>`<option ${c===it.categoria?'selected':''}>${c}</option>`).join('')}</select>
           <input value="${escAttr(it.tipo||'')}" placeholder="Tipo" oninput="hoyDetections.items[${i}].tipo=this.value">
           <input value="${escAttr(it.color||'')}" placeholder="Color" oninput="hoyDetections.items[${i}].color=this.value">
           <input value="${escAttr(it.colorSecundario||'')}" placeholder="Color secundario" oninput="hoyDetections.items[${i}].colorSecundario=this.value">
@@ -1217,7 +1261,7 @@ function renderRevisionHoy(){
         <button class="remove" onclick="quitarDeteccionHoy(${i})" title="No incluir esta prenda">✕</button>
       </div>
       ${estadoMatchHtml}
-      <button class="btn ghost" style="margin-top:8px;font-size:12px;padding:6px 10px" onclick="abrirRevisarCategoriaHoy(${i})">🔍 Revisar catálogo de ${escAttr(it.categoria)} (${candidatos.length})</button>
+      <button class="btn ghost" style="margin-top:8px;font-size:12px;padding:6px 10px" onclick="abrirRevisarCategoriaHoy(${i})">🔍 ${prendaConfirmada?'Cambiar':'Revisar'} catálogo de ${escAttr(it.categoria)} (${candidatos.length})</button>
     </div>`;
   });
   area.innerHTML = `${badgeModelo}${cardsHtml}
