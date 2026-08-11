@@ -338,7 +338,7 @@ let SHEET_URL = '';
 // Nombre-landmark de esta versión — cámbialo en cada cambio que se
 // despliegue, así se puede saber a simple vista (en Perfil) si el
 // celular ya está viendo lo último o una copia vieja en caché.
-const BUILD_VERSION = 'Queretaro';
+const BUILD_VERSION = 'Reynosa';
 let DATA = { prendas: [], usos: [], outfits_sugeridos: [], perfil: [], fotos_origen: [] };
 let showTrash = false;
 let soloFavoritos = false;
@@ -3234,6 +3234,18 @@ async function reaplicarMoldeATipo(clave, btnId){
   renderMoldes();
   showToast(ok===lista.length ? `Listo: ${ok} prenda(s) en el molde` : `${ok} de ${lista.length} re-alineadas (revisa la conexión)`);
 }
+// Si la pantalla del Vestidor ya estaba abierta (visitada antes en esta
+// sesión), su maniquí se queda con el src viejo aunque cambies género/
+// estatura/peinado en Perfil — nada volvía a pedirlo. Sin esto, "Ajustar
+// en maniquí" (que sí pide el maniquí actual) y el Vestidor se ven
+// distintos entre sí, y una posición ajustada en uno no calza en el otro.
+async function refrescarVestidorManiqui(){
+  const cont = document.getElementById('vestidorPreview');
+  if(!cont) return;
+  const genero = localStorage.getItem('ropa_maniqui_genero')||'mujer';
+  const maniqui = await obtenerManiquiBase(genero);
+  cont.innerHTML = (maniqui&&maniqui.url ? `<img class="maniqui-doll-base" src="${maniqui.url}">` : '') + capasHtml();
+}
 // El género elegido aquí decide qué maniquí base se usa en todo el
 // Vestidor (Ideas y, si hace falta regenerarlo, el armador). Se deja
 // precacheado de una vez para que al entrar al Vestidor nunca haya que
@@ -3245,6 +3257,7 @@ async function elegirGeneroManiqui(genero){
   showToast('Preparando maniquí de '+genero+'…');
   const ok = await obtenerManiquiBase(genero);
   showToast(ok ? 'Maniquí de '+genero+' listo' : 'No se pudo preparar el maniquí, se generará después');
+  if(ok) refrescarVestidorManiqui();
 }
 // Igual que el género, pero para la estatura del maniquí — pedido
 // explícito: por defecto queda "chaparrita" (1.50m aprox, la estatura de
@@ -3258,6 +3271,7 @@ async function elegirEstaturaManiqui(estatura){
   showToast('Preparando maniquí '+estatura+'…');
   const ok = await obtenerManiquiBase(genero, estatura);
   showToast(ok ? 'Maniquí '+estatura+' listo' : 'No se pudo preparar el maniquí, se generará después');
+  if(ok) refrescarVestidorManiqui();
 }
 // Igual patrón, para el peinado — pedido explícito: pelucas de cabello
 // oscuro sueltas o recogidas, además de la opción sin pelo de siempre.
@@ -3270,6 +3284,7 @@ async function elegirPeinadoManiqui(peinado){
   showToast('Preparando maniquí…');
   const ok = await obtenerManiquiBase(genero, estatura, peinado);
   showToast(ok ? 'Maniquí listo' : 'No se pudo preparar el maniquí, se generará después');
+  if(ok) refrescarVestidorManiqui();
 }
 // Se lista desde DATA.fotos_origen (persistente) y NO derivado de las
 // prendas activas — si borras todas las prendas de una foto, la foto
