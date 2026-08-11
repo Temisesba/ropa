@@ -238,6 +238,12 @@ nav.tabbar button .ic{font-size:19px}
 
     <section class="screen" id="screen-olvidados">
       <h2>Calendario</h2>
+      <h3>Próximos planeados</h3>
+      <p class="hint">¿Algo especial que ya sepas? Planéalo desde ahora.</p>
+      <button class="btn secondary" onclick="abrirPlanificarDia()">➕ Planificar un día</button>
+      <div id="proximosPlaneadosLista" style="margin-top:10px"></div>
+
+      <h3 style="margin-top:26px">Historial</h3>
       <p class="hint">Tus outfits completos, del más nuevo al más viejo.</p>
       <div class="chips" id="calFiltroChips">
         <button class="chip" data-filtro="semana" onclick="calendarioFiltrar('semana')">Esta semana</button>
@@ -338,7 +344,7 @@ let SHEET_URL = '';
 // Nombre-landmark de esta versión — cámbialo en cada cambio que se
 // despliegue, así se puede saber a simple vista (en Perfil) si el
 // celular ya está viendo lo último o una copia vieja en caché.
-const BUILD_VERSION = 'Zacatecas2';
+const BUILD_VERSION = 'Acapulco';
 let DATA = { prendas: [], usos: [], outfits_sugeridos: [], perfil: [], fotos_origen: [] };
 let showTrash = false;
 let soloFavoritos = false;
@@ -770,11 +776,15 @@ function renderRevisionFoto(){
           <input value="${escAttr(it.color||'')}" placeholder="Color" oninput="currentDetections.items[${i}].color=this.value">
           <input value="${escAttr(it.colorSecundario||'')}" placeholder="Color secundario" oninput="currentDetections.items[${i}].colorSecundario=this.value">
           <input class="full" value="${escAttr(it.estampado||'')}" placeholder="Estampado (opcional)" oninput="currentDetections.items[${i}].estampado=this.value">
+          <input class="full" value="${escAttr(it.notaIA||'')}" placeholder="Nota para la IA (opcional) — ej: es de una sola pieza" oninput="currentDetections.items[${i}].notaIA=this.value">
         </div>
         <button class="remove" onclick="quitarDeteccion(${i})" title="No incluir esta prenda">✕</button>
       </div>
       ${estadoMatchHtml}
-      <button class="btn ghost" style="margin-top:6px;font-size:12px;padding:6px 10px" onclick="abrirRevisarCategoriaSubir(${i})">🔍 ${prendaConfirmada?'Cambiar':'Revisar'} catálogo de ${escAttr(it.categoria)} (${candidatos.length})</button>
+      <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:6px">
+        <button class="btn ghost" style="font-size:12px;padding:6px 10px" onclick="abrirRevisarCategoriaSubir(${i})">🔍 ${prendaConfirmada?'Cambiar':'Revisar'} catálogo de ${escAttr(it.categoria)} (${candidatos.length})</button>
+        <button class="btn ghost" style="font-size:12px;padding:6px 10px" onclick="abrirExtenderCaja(${i})" title="Si la IA separó una prenda de una sola pieza en dos recuadros, extiende este para que cubra ambas">📐 Extender/recortar</button>
+      </div>
     </div>`;
   });
   const badgeModelo = d.modelo ? `<span class="chip" style="cursor:default">🤖 ${mensajeModelo(d,'Analizado')}</span>` : '';
@@ -793,6 +803,65 @@ function renderRevisionFoto(){
 }
 function escAttr(s){ return String(s).replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;'); }
 function quitarDeteccion(i){ currentDetections.items.splice(i,1); renderRevisionFoto(); }
+// Reusa la misma mecánica de recorte que mostrarRecorteManual (cropState +
+// posicionarCropBox + onCropPointerDown/Move/Up + el cálculo de
+// confirmarRecorte) pero con sus propios botones — es para "extender" el
+// recuadro de UN ítem ya detectado (ej. cuando la IA separó una prenda de
+// una sola pieza, como un traje de baño, en dos recuadros), no para la
+// foto completa al subir (eso ya lo cubre mostrarRecorteManual).
+function abrirExtenderCaja(i){
+  const d = currentDetections;
+  const it = d.items[i];
+  if(!it) return;
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay';
+  overlay.innerHTML = `<div class="modal">
+    <h3>Extender / recortar</h3>
+    <p class="hint">Ajusta el recuadro para que cubra toda la prenda (ej. si la IA la partió en dos). Luego borra el otro recuadro con la "✕".</p>
+    <div id="extenderCajaArea"></div>
+    <div class="actions">
+      <button class="btn ghost" id="extenderCancelar">Cancelar</button>
+      <button class="btn" id="extenderListo">✅ Usar este recorte</button>
+    </div>
+  </div>`;
+  document.body.appendChild(overlay);
+  const rectInicial = it.caja
+    ? { x:it.caja[1]/1000, y:it.caja[0]/1000, w:Math.max(0.05,(it.caja[3]-it.caja[1])/1000), h:Math.max(0.05,(it.caja[2]-it.caja[0])/1000) }
+    : { x:0.1, y:0.1, w:0.8, h:0.8 };
+  document.getElementById('extenderCajaArea').innerHTML = `
+    <div class="crop-wrap" id="cropWrap">
+      <img id="cropImg" src="${d.dataUrl}" draggable="false">
+      <div class="crop-box" id="cropBox">
+        <div class="crop-handle" data-corner="nw"></div>
+        <div class="crop-handle" data-corner="ne"></div>
+        <div class="crop-handle" data-corner="sw"></div>
+        <div class="crop-handle" data-corner="se"></div>
+      </div>
+    </div>`;
+  cropState = { resized: { dataUrl:d.dataUrl, width:d.width, height:d.height, canvas:d.canvas }, containerId:'extenderCajaArea', rect: rectInicial, mode:null, startPointer:null, startRect:null };
+  posicionarCropBox();
+  document.getElementById('cropBox').addEventListener('pointerdown', onCropPointerDown);
+  window.addEventListener('pointermove', onCropPointerMove);
+  window.addEventListener('pointerup', onCropPointerUp);
+  const cerrar = ()=>{ cleanupCropListeners(); overlay.remove(); cropState = null; };
+  overlay.addEventListener('click', e=>{ if(e.target===overlay) cerrar(); });
+  overlay.querySelector('#extenderCancelar').onclick = cerrar;
+  overlay.querySelector('#extenderListo').onclick = ()=>{
+    const r = cropState.rect;
+    cleanupCropListeners();
+    const sx = Math.round(r.x * d.width), sy = Math.round(r.y * d.height);
+    const sw = Math.max(1, Math.round(r.w * d.width)), sh = Math.max(1, Math.round(r.h * d.height));
+    const canvas = document.createElement('canvas');
+    canvas.width = sw; canvas.height = sh;
+    canvas.getContext('2d').drawImage(d.canvas, sx, sy, sw, sh, 0, 0, sw, sh);
+    it.cropPreview = canvas.toDataURL('image/jpeg', 0.85);
+    it.caja = [ Math.round(r.y*1000), Math.round(r.x*1000), Math.round((r.y+r.h)*1000), Math.round((r.x+r.w)*1000) ];
+    cropState = null;
+    overlay.remove();
+    renderRevisionFoto();
+    showToast('Recorte actualizado');
+  };
+}
 // sourceCanvas es el <canvas> ya renderizado que devolvió resizeImageFile
 // — se usa directo como fuente de drawImage (síncrono, sin decodificar
 // nada) en vez de crear un <img> nuevo desde el dataURL, que solo termina
@@ -1289,7 +1358,7 @@ async function crearFilaPrenda(it, origenUrl){
         imageBase64: it.cropPreview.split(',')[1], mimeType:'image/jpeg',
         categoria: it.categoria, tipo: it.tipo, color: it.color, colorSecundario: it.colorSecundario, estampado: it.estampado,
         maniquiBase64: maniqui.base64, maniquiMimeType: maniqui.mimeType,
-        claveColorHex: clave.hex, claveColorNombre: clave.nombre
+        claveColorHex: clave.hex, claveColorNombre: clave.nombre, feedback: it.notaIA||''
       });
       if(gen.ok){
         const recorte = await quitarFondoColor('data:'+(gen.mimeType||'image/jpeg')+';base64,'+gen.imageBase64, clave.hex);
@@ -1587,9 +1656,18 @@ function diasDesde(fechaISO){
 }
 function renderCatalogo(){
   const chips = document.getElementById('catChips');
-  chips.innerHTML = ['Todas', ...CATEGORIAS].map(c=>
-    `<button class="chip ${c===activeCategoria?'active':''}" onclick="activeCategoria='${c}';renderCatalogo()">${c==='Todas'?'Todas':CATEGORIA_ICONO[c]+' '+c}</button>`
+  chips.innerHTML = ['👗 Outfits', 'Todas', ...CATEGORIAS].map(c=>
+    `<button class="chip ${c===activeCategoria?'active':''}" onclick="activeCategoria='${c}';renderCatalogo()">${c==='Todas'?'Todas':c==='👗 Outfits'?c:CATEGORIA_ICONO[c]+' '+c}</button>`
   ).join('');
+  if(activeCategoria==='👗 Outfits'){
+    document.getElementById('btnFav').classList.toggle('active', false);
+    document.getElementById('papeleraAcciones').innerHTML = '';
+    const grid = document.getElementById('catGrid');
+    const guardados = DATA.outfits_sugeridos.filter(o=>!o.Fecha && !esVerdadero(o.Papelera));
+    grid.innerHTML = guardados.length ? guardados.map(outfitGuardadoCardHtml).join('')
+      : '<p class="hint">Todavía no guardaste ningún outfit — desde "👗 Vestidor" arma uno o pide ideas, y dale "💾 Guardar".</p>';
+    return;
+  }
   document.getElementById('btnFav').classList.toggle('active', soloFavoritos);
   const papeleraLlena = DATA.prendas.some(p=>esVerdadero(p.Papelera));
   document.getElementById('papeleraAcciones').innerHTML = (showTrash && papeleraLlena)
@@ -2608,6 +2686,7 @@ async function pedirSugerencias(){
       <div class="outfit-motivo">${escAttr(o.motivo||'')}</div>
       <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px">
         <button class="btn secondary" onclick='usarOutfitHoy(${JSON.stringify(o.prendaIds)})'>Usar hoy</button>
+        <button class="btn secondary" onclick='guardarOutfitGuardado(${JSON.stringify(o.prendaIds)}, ${JSON.stringify(o.motivo||'')}, "", ${JSON.stringify(evento||'')})'>💾 Guardar</button>
         <button class="btn secondary" id="btnMejorarIdea${o._idx}" onclick='mejorarOutfitConIA(${JSON.stringify(o.prendaIds)}, "mejoradoIdea${o._idx}", "btnMejorarIdea${o._idx}")'>✨ Mejorar con IA</button>
       </div>
       <div id="mejoradoIdea${o._idx}"></div>
@@ -2624,6 +2703,57 @@ async function usarOutfitHoy(prendaIds){
     localStorage.setItem('ropa_data_cache', JSON.stringify(DATA));
     showToast('Registrado como lo que usaste hoy');
   } else showToast('No se pudo registrar: '+(r.error||'sin conexión'));
+}
+
+// ============================================================
+//  Outfits guardados / planificados — reusa OUTFITS_SUGERIDOS
+//  (ID, Fecha, PrendaIDsJSON, Motivo, Evento, Papelera), tabla que ya
+//  existía en el backend pero nunca se usaba. Una fila con Fecha vacía es
+//  un outfit GUARDADO (biblioteca, sin fecha, se ve en Catálogo); una fila
+//  con Fecha puesta es un outfit PLANIFICADO para ese día (se ve en
+//  Calendario). Motivo hace de notas en ambos casos.
+// ============================================================
+async function guardarOutfitGuardado(prendaIds, motivo, fecha, evento){
+  if(!prendaIds || !prendaIds.length){ showToast('No hay prendas que guardar'); return null; }
+  const row = { ID: uid(), Fecha: fecha||'', PrendaIDsJSON: JSON.stringify(prendaIds), Motivo: motivo||'', Evento: evento||'', Papelera:false };
+  DATA.outfits_sugeridos.push(row);
+  localStorage.setItem('ropa_data_cache', JSON.stringify(DATA));
+  await apiPost('saveRow', { table:'OUTFITS_SUGERIDOS', row });
+  showToast(fecha ? 'Outfit planeado para ese día' : 'Outfit guardado');
+  return row;
+}
+async function eliminarOutfitGuardado(id){
+  const o = DATA.outfits_sugeridos.find(x=>x.ID===id); if(!o) return;
+  o.Papelera = true;
+  localStorage.setItem('ropa_data_cache', JSON.stringify(DATA));
+  await apiPost('saveRow', { table:'OUTFITS_SUGERIDOS', row:o });
+  showToast('Eliminado');
+  renderCatalogo(); renderCalendario();
+}
+async function guardarNotaOutfit(id, notas){
+  const o = DATA.outfits_sugeridos.find(x=>x.ID===id); if(!o) return;
+  o.Motivo = notas;
+  localStorage.setItem('ropa_data_cache', JSON.stringify(DATA));
+  await apiPost('saveRow', { table:'OUTFITS_SUGERIDOS', row:o });
+}
+// Tarjeta compartida entre "Outfits guardados" (Catálogo) y "Próximos
+// planeados" (Calendario) — mismas prendas, mismas acciones, el único
+// cambio es si se le muestra la fecha arriba.
+function outfitGuardadoCardHtml(o){
+  let ids = []; try{ ids = JSON.parse(o.PrendaIDsJSON||'[]'); }catch(e){}
+  const prendas = ids.map(id=>findPrenda(id)).filter(Boolean);
+  const fechaHtml = o.Fecha ? `<div class="tipo">📅 ${formatoFechaUso(o.Fecha)}${o.Evento?' — '+escAttr(o.Evento):''}</div>` : '';
+  return `<div class="card" style="width:100%;max-width:260px">
+    <div style="display:flex;gap:4px;flex-wrap:wrap;padding:8px">${prendas.length ? prendas.map(p=>fotoRecortadaHtml(p,{estilo:'width:56px;height:56px;object-fit:cover;border-radius:6px', clickable:false})).join('') : '<p class="hint">Esas prendas ya no están en tu catálogo.</p>'}</div>
+    <div class="body">
+      ${fechaHtml}
+      <textarea rows="2" placeholder="Notas…" style="width:100%;margin-top:6px" onchange="guardarNotaOutfit('${o.ID}', this.value)">${escAttr(o.Motivo||'')}</textarea>
+      <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:8px">
+        <button class="btn secondary" style="font-size:12px;padding:6px 10px" onclick='usarOutfitHoy(${JSON.stringify(ids)})'>Usar hoy</button>
+        <button class="remove" onclick="eliminarOutfitGuardado('${o.ID}')" title="Eliminar">🗑</button>
+      </div>
+    </div>
+  </div>`;
 }
 
 // ============================================================
@@ -2661,6 +2791,7 @@ function renderTableroOutfit(){
     <p class="hint" style="text-align:center;margin-top:10px" id="resumenOutfit"></p>
     <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:14px">
       <button class="btn" onclick="usarTableroOutfitHoy()">Usar este outfit hoy</button>
+      <button class="btn secondary" onclick="guardarOutfitDelArmador()">💾 Guardar outfit</button>
       <button class="btn secondary" id="btnFeedbackOutfit" onclick="pedirFeedbackOutfit()">💬 Feedback del outfit</button>
       <button class="btn secondary" id="btnMejorarVestidor" onclick="mejorarOutfitConIA(outfitBoard.capas, 'mejoradoVestidorArea', 'btnMejorarVestidor')">✨ Mejorar con IA</button>
     </div>
@@ -2852,6 +2983,11 @@ async function usarTableroOutfitHoy(){
   if(!outfitBoard.capas.length){ showToast('Elige al menos una prenda'); return; }
   await usarOutfitHoy(outfitBoard.capas.slice());
 }
+async function guardarOutfitDelArmador(){
+  if(!outfitBoard.capas.length){ showToast('Elige al menos una prenda'); return; }
+  const nota = prompt('¿Notas para este outfit? (opcional)') || '';
+  await guardarOutfitGuardado(outfitBoard.capas.slice(), nota, '', '');
+}
 async function pedirFeedbackOutfit(){
   if(!outfitBoard.capas.length){ showToast('Elige al menos una prenda'); return; }
   const prendas = outfitBoard.capas.map(id=>findPrenda(id)).filter(Boolean)
@@ -2990,7 +3126,22 @@ function dentroDelFiltroCalendario(fechaISO){
   if(calendarioFiltro==='anio') return d.getFullYear()===ahora.getFullYear();
   return true;
 }
+// Fecha (no hora) de hoy en formato yyyy-mm-dd, para comparar contra
+// o.Fecha (que puede venir con hora si se guardó vía new Date().toISOString())
+// sin que "hoy pero más tarde" se cuente como pasado.
+function hoyYMD(){ return new Date().toISOString().slice(0,10); }
+function renderProximosPlaneados(){
+  const cont = document.getElementById('proximosPlaneadosLista');
+  if(!cont) return;
+  const hoy = hoyYMD();
+  const planeados = DATA.outfits_sugeridos.filter(o=>o.Fecha && !esVerdadero(o.Papelera) && o.Fecha.slice(0,10)>=hoy)
+    .slice().sort((a,b)=> new Date(a.Fecha).getTime() - new Date(b.Fecha).getTime());
+  cont.innerHTML = planeados.length
+    ? `<div style="display:flex;gap:10px;flex-wrap:wrap">${planeados.map(outfitGuardadoCardHtml).join('')}</div>`
+    : '<p class="hint">Nada planeado todavía.</p>';
+}
 function renderCalendario(){
+  renderProximosPlaneados();
   const cont = document.getElementById('calendarioLista');
   if(!cont) return;
   const eventos = DATA.usos.filter(u=>u.Fecha && dentroDelFiltroCalendario(u.Fecha))
@@ -3011,6 +3162,167 @@ function renderCalendario(){
       </div>
     </div>`;
   }).join('');
+}
+// Planificar un día futuro: elegir fecha + una nota de "qué hay ese día"
+// (cena, defensa de tesis, etc.) y decidir el outfit por tres vías — IA,
+// a mano, o reusando uno ya guardado. Las tres terminan en el mismo
+// guardarOutfitGuardado(ids, motivo, fecha, evento).
+function abrirPlanificarDia(){
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay';
+  const manana = new Date(Date.now()+86400000).toISOString().slice(0,10);
+  overlay.innerHTML = `<div class="modal">
+    <h3>Planificar un día</h3>
+    <div class="field"><label class="hint">Fecha</label><input type="date" id="planFecha" value="${manana}" min="${hoyYMD()}"></div>
+    <div class="field"><label class="hint">¿Algo especial ese día? (opcional)</label><input type="text" id="planNota" placeholder="Cena, picnic, defensa de tesis…"></div>
+    <div class="chips" style="flex-direction:column;align-items:stretch;margin-top:10px">
+      <button class="btn secondary" id="planIA">🤖 Pedir sugerencia a la IA</button>
+      <button class="btn secondary" id="planManual">✋ Armar yo misma</button>
+      <button class="btn secondary" id="planGuardado">📚 Usar uno guardado</button>
+    </div>
+    <div id="planResultado" style="margin-top:10px"></div>
+    <div class="actions"><button class="btn ghost" id="planCerrar">Cerrar</button></div>
+  </div>`;
+  document.body.appendChild(overlay);
+  overlay.addEventListener('click', e=>{ if(e.target===overlay) overlay.remove(); });
+  overlay.querySelector('#planCerrar').onclick = ()=> overlay.remove();
+  overlay.querySelector('#planIA').onclick = ()=> pedirSugerenciaParaDia(overlay);
+  overlay.querySelector('#planManual').onclick = ()=>{
+    const fecha = document.getElementById('planFecha').value;
+    const nota = document.getElementById('planNota').value.trim();
+    if(!fecha){ showToast('Elige una fecha'); return; }
+    overlay.remove();
+    abrirArmarOutfitManual(async (ids)=>{
+      await guardarOutfitGuardado(ids, nota, fecha, nota);
+      renderCalendario();
+    });
+  };
+  overlay.querySelector('#planGuardado').onclick = ()=>{
+    const fecha = document.getElementById('planFecha').value;
+    const nota = document.getElementById('planNota').value.trim();
+    if(!fecha){ showToast('Elige una fecha'); return; }
+    overlay.remove();
+    abrirElegirOutfitGuardado(async (o)=>{
+      let ids = []; try{ ids = JSON.parse(o.PrendaIDsJSON||'[]'); }catch(e){}
+      await guardarOutfitGuardado(ids, nota||o.Motivo||'', fecha, nota);
+      renderCalendario();
+    });
+  };
+}
+async function pedirSugerenciaParaDia(overlay){
+  const fecha = overlay.querySelector('#planFecha').value;
+  const nota = overlay.querySelector('#planNota').value.trim();
+  if(!fecha){ showToast('Elige una fecha'); return; }
+  const area = overlay.querySelector('#planResultado');
+  area.innerHTML = '<p class="hint">Pensando outfits…</p>';
+  const perfil = DATA.perfil[0] || {};
+  const r = await apiPost('sugerirOutfit', { evento: nota, clima: '', tonoPiel: perfil.TonoPiel||'', subtono: perfil.Subtono||'' });
+  if(!r.ok){ area.innerHTML = `<p class="hint">No se pudo generar ideas: ${r.error||'sin conexión'}</p>`; return; }
+  if(!r.outfits || !r.outfits.length){ area.innerHTML = '<p class="hint">La IA no encontró combinaciones — agrega más prendas al catálogo.</p>'; return; }
+  const genero = localStorage.getItem('ropa_maniqui_genero')||'mujer';
+  const maniquiInfo = await maniquiConPeinadoHtml(genero);
+  area.innerHTML = r.outfits.map(o=>{
+    const prendaIds = (o.prendaIds||[]).filter(id=>findPrenda(id));
+    const prendas = prendaIds.map(id=>findPrenda(id)).filter(Boolean);
+    const capas = maniquiInfo.cuerpo ? maniquiInfo.html + prendas.map(p=>p.FotoGeneradaURL?`<img class="maniqui-doll-capa-full" src="${p.FotoGeneradaURL}">`:'').join('') : '';
+    return `<div class="outfit-card">
+      <div class="maniqui-doll-wrap" style="max-width:160px">${capas}</div>
+      <div class="outfit-items">${prendas.map(p=>fotoRecortadaHtml(p,{estilo:'height:56px;flex:none'})).join('')}</div>
+      <div class="outfit-motivo">${escAttr(o.motivo||'')}</div>
+      <button class="btn secondary" style="margin-top:8px" onclick='guardarOutfitParaDia(${JSON.stringify(prendaIds)}, ${JSON.stringify(o.motivo||'')}, ${JSON.stringify(fecha)}, ${JSON.stringify(nota)})'>💾 Guardar para este día</button>
+    </div>`;
+  }).join('');
+}
+async function guardarOutfitParaDia(ids, motivoIA, fecha, nota){
+  const motivo = [nota, motivoIA].filter(Boolean).join(' — ');
+  await guardarOutfitGuardado(ids, motivo, fecha, nota);
+  document.querySelectorAll('.modal-overlay').forEach(o=>o.remove());
+  renderCalendario();
+}
+// Picker ligero de multi-selección por categoría, autónomo (no toca
+// outfitBoard) — mismo patrón visual que abrirAgregarCapa pero con su
+// propio estado temporal, para "✋ Armar yo misma" al planificar un día.
+let armarManualSeleccion = null;
+function abrirArmarOutfitManual(onListo){
+  const cats = CATEGORIAS.filter(c=>itemsPorCategoria(c).length);
+  if(!cats.length){ showToast('Todavía no tienes prendas en el catálogo'); return; }
+  armarManualSeleccion = [];
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay';
+  overlay.innerHTML = `<div class="modal">
+    <h3>Arma el outfit</h3>
+    <p class="hint">Toca para agregar o quitar — puedes elegir varias de la misma categoría.</p>
+    <div class="chips" id="armarManualTabs" style="flex-wrap:wrap">
+      ${cats.map((c,i)=>`<button class="chip ${i===0?'active':''}" data-cat="${escAttr(c)}" onclick="mostrarCategoriaArmarManual('${escAttr(c)}')">${CATEGORIA_ICONO[c]} ${c}</button>`).join('')}
+    </div>
+    <div class="grid" id="armarManualGrid"></div>
+    <div class="actions">
+      <button class="btn ghost" id="armarManualCancelar">Cancelar</button>
+      <button class="btn" id="armarManualListo">Listo</button>
+    </div>
+  </div>`;
+  document.body.appendChild(overlay);
+  overlay.addEventListener('click', e=>{ if(e.target===overlay){ overlay.remove(); armarManualSeleccion=null; } });
+  overlay.querySelector('#armarManualCancelar').onclick = ()=>{ overlay.remove(); armarManualSeleccion=null; };
+  overlay.querySelector('#armarManualListo').onclick = ()=>{
+    if(!armarManualSeleccion.length){ showToast('Elige al menos una prenda'); return; }
+    const elegido = armarManualSeleccion.slice();
+    armarManualSeleccion = null;
+    overlay.remove();
+    onListo(elegido);
+  };
+  mostrarCategoriaArmarManual(cats[0]);
+}
+function mostrarCategoriaArmarManual(cat){
+  document.querySelectorAll('#armarManualTabs .chip').forEach(b=> b.classList.toggle('active', b.dataset.cat===cat));
+  const grid = document.getElementById('armarManualGrid');
+  if(!grid || !armarManualSeleccion) return;
+  const items = itemsPorCategoria(cat);
+  grid.innerHTML = items.map(p=>`<div class="card" style="cursor:pointer" onclick="toggleArmarManual('${p.ID}','${escAttr(cat)}')">
+    ${fotoRecortadaHtml(p,{estilo:'width:100%', clickable:false})}
+    <div class="body"><div class="tipo">${escAttr(p.Tipo||p.Categoria)}${armarManualSeleccion.includes(p.ID)?' ✅':''}</div></div>
+  </div>`).join('');
+}
+function toggleArmarManual(id, cat){
+  if(!armarManualSeleccion) return;
+  const idx = armarManualSeleccion.indexOf(id);
+  if(idx>=0) armarManualSeleccion.splice(idx,1); else armarManualSeleccion.push(id);
+  mostrarCategoriaArmarManual(cat);
+}
+// Elegir de la biblioteca de outfits ya guardados (sin fecha) — usado por
+// "📚 Usar uno guardado" al planificar un día; guarda una copia con la
+// fecha nueva, no muta el guardado original.
+let outfitGuardadoElegidoCallback = null;
+function abrirElegirOutfitGuardado(onListo){
+  const guardados = DATA.outfits_sugeridos.filter(o=>!o.Fecha && !esVerdadero(o.Papelera));
+  if(!guardados.length){ showToast('Todavía no tienes outfits guardados'); return; }
+  outfitGuardadoElegidoCallback = onListo;
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay';
+  overlay.innerHTML = `<div class="modal">
+    <h3>Elige un outfit guardado</h3>
+    <div style="display:flex;flex-direction:column;gap:10px;margin-top:10px">
+      ${guardados.map(o=>{
+        let ids = []; try{ ids = JSON.parse(o.PrendaIDsJSON||'[]'); }catch(e){}
+        const prendas = ids.map(id=>findPrenda(id)).filter(Boolean);
+        return `<div class="card" style="width:100%;cursor:pointer" onclick="elegirOutfitGuardadoParaDia('${o.ID}')">
+          <div style="display:flex;gap:4px;flex-wrap:wrap;padding:8px">${prendas.map(p=>fotoRecortadaHtml(p,{estilo:'width:48px;height:48px;object-fit:cover;border-radius:6px', clickable:false})).join('')}</div>
+          <div class="body"><div class="hint">${escAttr(o.Motivo||'Sin notas')}</div></div>
+        </div>`;
+      }).join('')}
+    </div>
+    <div class="actions"><button class="btn ghost" id="elegirGuardadoCerrar">Cancelar</button></div>
+  </div>`;
+  document.body.appendChild(overlay);
+  overlay.addEventListener('click', e=>{ if(e.target===overlay){ overlay.remove(); outfitGuardadoElegidoCallback=null; } });
+  overlay.querySelector('#elegirGuardadoCerrar').onclick = ()=>{ overlay.remove(); outfitGuardadoElegidoCallback=null; };
+}
+function elegirOutfitGuardadoParaDia(id){
+  const cb = outfitGuardadoElegidoCallback;
+  outfitGuardadoElegidoCallback = null;
+  document.querySelectorAll('.modal-overlay').forEach(o=>o.remove());
+  const o = DATA.outfits_sugeridos.find(x=>x.ID===id);
+  if(o && cb) cb(o);
 }
 // El detalle de "sin usar hace tiempo" (antes su propia pestaña) ahora
 // vive en un modal aparte, aparte del Calendario — se pidió que el
