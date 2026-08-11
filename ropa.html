@@ -273,6 +273,10 @@ nav.tabbar button .ic{font-size:19px}
       </div>
       <button class="btn" onclick="guardarPerfil()">Guardar perfil</button>
 
+      <h3 style="margin-top:26px">Moldes del maniquí</h3>
+      <p class="hint">Cada tipo de prenda tiene un molde: el lugar y el tamaño exactos que ocupa sobre el maniquí. Cada foto nueva se acomoda sola en el molde de su tipo, así que solo tienes que dejarlo bien una vez. Ajusta el que no te cuadre y, si quieres, re-alinea de un jalón las prendas que ya tenías.</p>
+      <div id="moldesArea"></div>
+
       <h3 style="margin-top:26px">Fotos subidas</h3>
       <p class="hint">Ponles fecha si sabes cuándo son (se ve igual en todas las prendas que salieron de esa foto) o elimínalas de tus prendas.</p>
       <div id="fotosSubidasArea"></div>
@@ -317,7 +321,7 @@ let SHEET_URL = '';
 // Nombre-landmark de esta versión — cámbialo en cada cambio que se
 // despliegue, así se puede saber a simple vista (en Perfil) si el
 // celular ya está viendo lo último o una copia vieja en caché.
-const BUILD_VERSION = 'Merida';
+const BUILD_VERSION = 'Zacatecas';
 let DATA = { prendas: [], usos: [], outfits_sugeridos: [], perfil: [], fotos_origen: [], plantillas: [] };
 let showTrash = false;
 let soloFavoritos = false;
@@ -807,10 +811,10 @@ const MANIQUI_CANVAS = { w: 720, h: 1280 };
 // porque el maniquí siempre es el mismo (una vez generado, se cachea).
 const ANCLAS_MANIQUI = { cabeza:4.0, rostro:10.0, cuello:16.0, hombros:20.0, pecho:28.9, cintura:40.0, cadera:45.8, munecas:47.0, rodillas:73.4, tobillos:90.4, pies:93.0 };
 // Por categoría: ancho objetivo (% del lienzo) y a qué ancla se alinea
-// el borde superior (o inferior, para calzado) de la prenda. La altura
-// nunca se fuerza — se preserva la proporción real de cada prenda
-// (recorte apaisado o largo cae donde le corresponda según su propio
-// bbox), solo se ancla un punto y se escala por el ancho.
+// el borde superior (o inferior, para calzado) de la prenda — respaldo
+// para cuando el Tipo no calza con ningún MOLDE de abajo. La altura
+// nunca se fuerza — se preserva la proporción real de cada prenda, solo
+// se ancla un punto y se escala por el ancho.
 const REGLAS_ANCLA = {
   'Ropa superior': { ancho:46, vAlign:'top',    anclaY:'hombros' },
   'Vestidos':      { ancho:46, vAlign:'top',    anclaY:'hombros' },
@@ -822,78 +826,112 @@ const REGLAS_ANCLA = {
   'Ropa interior': { ancho:40, vAlign:'top',    anclaY:'cintura' },
   'Deportiva':     { ancho:46, vAlign:'top',    anclaY:'hombros' }
 };
-// "Accesorios" es demasiado variado para una sola ancla por categoría —
-// un reloj, unos lentes y un cinturón no van en el mismo lugar del
-// cuerpo. Antes de usar la regla genérica de la categoría, se revisa el
-// Tipo (texto libre que ya escribe la IA o el usuario) por palabras
-// clave — si no coincide con nada, cae a la regla de categoría de
-// siempre. No intenta ser exhaustivo, solo cubrir los casos más
-// comunes; para lo que no calce está "✋ Ajustar en maniquí".
-const ANCLA_POR_TIPO = [
-  { patrones:['reloj','pulsera','brazalete','muneca'], regla:{ ancho:10, vAlign:'top', anclaY:'munecas' } },
-  { patrones:['lente','gafas','anteojo'],               regla:{ ancho:26, vAlign:'top', anclaY:'rostro' } },
-  { patrones:['arete','pendiente'],                     regla:{ ancho:8,  vAlign:'top', anclaY:'rostro' } },
-  { patrones:['cinturon','cinto'],                       regla:{ ancho:40, vAlign:'top', anclaY:'cintura' } },
-  { patrones:['bufanda','panuelo','collar','corbata'],   regla:{ ancho:26, vAlign:'top', anclaY:'cuello' } },
-  { patrones:['sombrero','gorra','gorro','boina'],       regla:{ ancho:32, vAlign:'top', anclaY:'cabeza' } }
+// ------------------------------------------------------------
+//  MOLDES por tipo de prenda
+// ------------------------------------------------------------
+// Una categoría entera es demasiado gruesa: una falda larga, una
+// minifalda y unos leggings son todos "Ropa inferior" pero no ocupan el
+// mismo espacio del maniquí; un reloj, unos lentes y un cinturón son
+// todos "Accesorios" y van en tres partes distintas del cuerpo. Por eso
+// la unidad real de alineación es el MOLDE: un rectángulo objetivo fijo
+// sobre el lienzo canónico (ancho en % del lienzo, punto de anclaje
+// vertical, y centro horizontal) que ya sabemos que le queda bien al
+// maniquí para ese tipo de prenda.
+//
+// El molde se elige por palabras clave del Tipo (texto libre que escribe
+// la IA o la usuaria). Cada foto nueva NO se acomoda desde cero: se
+// escala y se traslada hasta calzar en el molde de su tipo, así que
+// siempre cae donde ya sabemos que se ve bien. Si el Tipo no coincide
+// con ningún molde, cae a la regla de categoría de siempre (REGLAS_ANCLA).
+//
+// Los moldes se pueden re-ajustar a mano (Perfil → "Moldes del maniquí",
+// o guardando un "✋ Ajustar en maniquí" como molde) y el ajuste queda
+// guardado para TODAS las prendas futuras de ese tipo — y con un botón
+// se puede reacomodar de un jalón (sin IA) las que ya existían. El orden
+// importa: lo específico va antes que lo genérico ("falda larga" antes
+// que "falda"), porque gana la primera coincidencia.
+const MOLDES_BASE = [
+  // Ropa superior
+  { clave:'playera',      nombre:'Playera / camiseta',   grupo:'Arriba',      patrones:['playera','camiseta','tshirt','t-shirt','polo'],                          regla:{ ancho:46, vAlign:'top', anclaY:20.0, xCentro:50 } },
+  { clave:'blusa',        nombre:'Blusa / camisa',       grupo:'Arriba',      patrones:['blusa','camisa','camisola'],                                                    regla:{ ancho:46, vAlign:'top', anclaY:20.0, xCentro:50 } },
+  { clave:'sueter',       nombre:'Suéter / sudadera',    grupo:'Arriba',      patrones:['sueter','sudadera','hoodie','jersey','pullover','cardigan','chaleco'],          regla:{ ancho:48, vAlign:'top', anclaY:19.5, xCentro:50 } },
+  { clave:'abrigo',       nombre:'Abrigo / chamarra',    grupo:'Arriba',      patrones:['abrigo','chamarra','chaqueta','saco','blazer','gabardina','impermeable','trench'], regla:{ ancho:54, vAlign:'top', anclaY:19.0, xCentro:50 } },
+  // Ropa inferior
+  { clave:'falda-larga',  nombre:'Falda larga / midi',   grupo:'Abajo',       patrones:['falda larga','falda maxi','falda midi','maxifalda'],                            regla:{ ancho:44, vAlign:'top', anclaY:41.0, xCentro:50 } },
+  { clave:'falda-corta',  nombre:'Falda corta / mini',   grupo:'Abajo',       patrones:['falda corta','minifalda','falda mini'],                                         regla:{ ancho:40, vAlign:'top', anclaY:41.0, xCentro:50 } },
+  { clave:'falda',        nombre:'Falda (sin largo)',    grupo:'Abajo',       patrones:['falda'],                                                                        regla:{ ancho:40, vAlign:'top', anclaY:41.0, xCentro:50 } },
+  { clave:'leggings',     nombre:'Leggings / mallas',    grupo:'Abajo',       patrones:['legging','mallas','jegging','licra'],                                           regla:{ ancho:32, vAlign:'top', anclaY:40.0, xCentro:50 } },
+  { clave:'short',        nombre:'Short / bermuda',      grupo:'Abajo',       patrones:['short','bermuda'],                                                              regla:{ ancho:38, vAlign:'top', anclaY:40.0, xCentro:50 } },
+  { clave:'pantalon',     nombre:'Pantalón / jeans',     grupo:'Abajo',       patrones:['pantalon','jeans','vaquero','chino','mezclilla'],                               regla:{ ancho:38, vAlign:'top', anclaY:40.0, xCentro:50 } },
+  // Vestidos y enterizos
+  { clave:'vestido-largo',nombre:'Vestido largo / midi', grupo:'Enterizos',   patrones:['vestido largo','vestido maxi','vestido midi'],                                  regla:{ ancho:46, vAlign:'top', anclaY:20.0, xCentro:50 } },
+  { clave:'vestido-corto',nombre:'Vestido corto',        grupo:'Enterizos',   patrones:['vestido corto','vestido mini'],                                                 regla:{ ancho:46, vAlign:'top', anclaY:20.0, xCentro:50 } },
+  { clave:'vestido',      nombre:'Vestido (sin largo)',  grupo:'Enterizos',   patrones:['vestido'],                                                                      regla:{ ancho:46, vAlign:'top', anclaY:20.0, xCentro:50 } },
+  { clave:'jumpsuit',     nombre:'Jumpsuit / overol',    grupo:'Enterizos',   patrones:['jumpsuit','overol','mameluco','enterizo'],                                         regla:{ ancho:44, vAlign:'top', anclaY:20.0, xCentro:50 } },
+  // Calzado
+  { clave:'botas',        nombre:'Botas / botines',      grupo:'Calzado',     patrones:['bota','botin'],                                                                 regla:{ ancho:27, vAlign:'bottom', anclaY:93.0, xCentro:50 } },
+  { clave:'tenis',        nombre:'Tenis / deportivos',   grupo:'Calzado',     patrones:['tenis','sneaker','deportivo'],                                                  regla:{ ancho:30, vAlign:'bottom', anclaY:93.0, xCentro:50 } },
+  { clave:'sandalias',    nombre:'Sandalias / huaraches',grupo:'Calzado',     patrones:['sandalia','huarache','chancla','alpargata'],                                     regla:{ ancho:28, vAlign:'bottom', anclaY:93.0, xCentro:50 } },
+  { clave:'zapatos',      nombre:'Zapatos / tacones',    grupo:'Calzado',     patrones:['zapato','tacon','mocasin','balerina','flat','zapatilla'],                        regla:{ ancho:30, vAlign:'bottom', anclaY:93.0, xCentro:50 } },
+  // Accesorios
+  { clave:'gorro',        nombre:'Gorro / gorra / sombrero', grupo:'Accesorios', patrones:['sombrero','gorra','gorro','boina','beanie'],                                  regla:{ ancho:32, vAlign:'top', anclaY:4.0,  xCentro:50 } },
+  { clave:'lentes',       nombre:'Lentes',               grupo:'Accesorios',  patrones:['lente','gafas','anteojo'],                                                      regla:{ ancho:26, vAlign:'top', anclaY:10.0, xCentro:50 } },
+  { clave:'aretes',       nombre:'Aretes',               grupo:'Accesorios',  patrones:['arete','pendiente'],                                                            regla:{ ancho:8,  vAlign:'top', anclaY:10.0, xCentro:50 } },
+  { clave:'bufanda',      nombre:'Bufanda / pañuelo',    grupo:'Accesorios',  patrones:['bufanda','panuelo','mascada','chalina'],                                        regla:{ ancho:26, vAlign:'top', anclaY:16.0, xCentro:50 } },
+  { clave:'collar',       nombre:'Collar',               grupo:'Accesorios',  patrones:['collar','gargantilla','cadena'],                                                regla:{ ancho:18, vAlign:'top', anclaY:16.5, xCentro:50 } },
+  { clave:'corbata',      nombre:'Corbata',              grupo:'Accesorios',  patrones:['corbata','corbatin','mono de cuello'],                                          regla:{ ancho:12, vAlign:'top', anclaY:17.0, xCentro:50 } },
+  { clave:'reloj',        nombre:'Reloj / pulsera',      grupo:'Accesorios',  patrones:['reloj','pulsera','brazalete','muneca'],                                         regla:{ ancho:10, vAlign:'top', anclaY:47.0, xCentro:50 } },
+  { clave:'cinturon',     nombre:'Cinturón',             grupo:'Accesorios',  patrones:['cinturon','cinto','faja'],                                                      regla:{ ancho:40, vAlign:'top', anclaY:40.0, xCentro:50 } },
+  // Bolsos
+  { clave:'mochila',      nombre:'Mochila',              grupo:'Bolsos',      patrones:['mochila','backpack'],                                                           regla:{ ancho:26, vAlign:'top', anclaY:28.9, xCentro:50 } },
+  { clave:'bolso',        nombre:'Bolso / cartera',      grupo:'Bolsos',      patrones:['bolso','bolsa','cartera','clutch','morral'],                                    regla:{ ancho:28, vAlign:'top', anclaY:45.8, xCentro:50 } }
 ];
-function reglaAnclaParaPrenda(categoria, tipo){
-  if(categoria==='Accesorios' && tipo){
-    const t = normalizarTexto(tipo);
-    for(const o of ANCLA_POR_TIPO){ if(o.patrones.some(p=>t.includes(p))) return o.regla; }
+const MOLDES_KEY = 'ropa_moldes_v1';
+// Los ajustes finos que hace la usuaria viven aparte de los moldes base
+// (nunca se sobrescribe el default) — así "↺ Volver al original" siempre
+// puede regresar exactamente al valor de fábrica.
+let MOLDES_USUARIO = (function(){ try{ return JSON.parse(localStorage.getItem(MOLDES_KEY))||{}; }catch(e){ return {}; } })();
+function guardarMoldesUsuario(){ try{ localStorage.setItem(MOLDES_KEY, JSON.stringify(MOLDES_USUARIO)); }catch(e){} }
+function moldeBase(clave){ return MOLDES_BASE.find(m=>m.clave===clave) || null; }
+// Regla efectiva de un molde = default + lo que la usuaria haya ajustado.
+function reglaMolde(clave){
+  const base = moldeBase(clave);
+  if(!base) return null;
+  return Object.assign({}, base.regla, MOLDES_USUARIO[clave]||{});
+}
+function moldeEstaAjustado(clave){ return !!MOLDES_USUARIO[clave]; }
+// Qué molde le toca a una prenda, según su Tipo. Devuelve '' si nada
+// coincide (cae a REGLAS_ANCLA por categoría en reglaAnclaParaPrenda).
+function claveMoldeParaPrenda(categoria, tipo){
+  const t = normalizarTexto(tipo);
+  if(t){
+    for(const m of MOLDES_BASE){ if(m.patrones.some(p=>t.includes(p))) return m.clave; }
   }
+  return '';
+}
+function nombreMoldeParaPrenda(categoria, tipo){
+  const clave = claveMoldeParaPrenda(categoria, tipo);
+  const m = clave ? moldeBase(clave) : null;
+  return m ? m.nombre : '';
+}
+function reglaAnclaParaPrenda(categoria, tipo){
+  const clave = claveMoldeParaPrenda(categoria, tipo);
+  const r = clave ? reglaMolde(clave) : null;
+  if(r) return r;
   return REGLAS_ANCLA[categoria] || REGLAS_ANCLA['Ropa superior'];
 }
-// Sistema de plantillas: el "subtipo" es el bucket que decide qué
-// plantilla usar (ver PLANTILLAS / generarCapaConPlantilla) — se infiere
-// de Tipo por palabras clave, con un default por categoría para que
-// nunca quede sin bucket. Editable a mano en Editar prenda.
-const SUBTIPOS_POR_CATEGORIA = {
-  'Ropa superior': [
-    { patrones:['manga larga'], subtipo:'playera manga larga' },
-    { patrones:['sin mangas','tirantes'], subtipo:'top sin mangas' },
-    { patrones:['sueter','suéter','sweater'], subtipo:'suéter' },
-    { patrones:['sudadera','hoodie'], subtipo:'sudadera' },
-    { patrones:['manga corta'], subtipo:'playera manga corta' }
-  ],
-  'Ropa inferior': [
-    { patrones:['falda corta','mini falda'], subtipo:'falda corta' },
-    { patrones:['falda larga','falda midi','falda'], subtipo:'falda larga' },
-    { patrones:['short'], subtipo:'short' },
-    { patrones:['ancho','palazzo','wide'], subtipo:'pantalón ancho' }
-  ],
-  'Vestidos': [
-    { patrones:['largo','maxi'], subtipo:'vestido largo' },
-    { patrones:['corto','mini'], subtipo:'vestido corto' }
-  ],
-  'Calzado': [
-    { patrones:['bota'], subtipo:'botas' },
-    { patrones:['sandalia'], subtipo:'sandalias' },
-    { patrones:['tacon','tacón'], subtipo:'tacones' },
-    { patrones:['formal','mocasin','mocasín'], subtipo:'zapato formal' }
-  ],
-  'Abrigos': [
-    { patrones:['blazer','saco'], subtipo:'blazer' },
-    { patrones:['chamarra','chaqueta'], subtipo:'chamarra' }
-  ],
-  'Bolsos': [
-    { patrones:['mochila'], subtipo:'mochila' },
-    { patrones:['cruzado'], subtipo:'bolso cruzado' }
-  ],
-  'Accesorios': ANCLA_POR_TIPO.map(o=>({ patrones:o.patrones, subtipo:o.patrones[0] }))
-};
-const SUBTIPO_DEFAULT = {
-  'Ropa superior':'playera manga corta', 'Ropa inferior':'pantalón recto', 'Vestidos':'vestido corto',
-  'Calzado':'tenis', 'Abrigos':'chamarra', 'Bolsos':'bolso de mano', 'Accesorios':'accesorio',
-  'Ropa interior':'ropa interior', 'Deportiva':'deportiva'
-};
-function subtipoParaPrenda(categoria, tipo){
-  const reglas = SUBTIPOS_POR_CATEGORIA[categoria];
-  if(reglas && tipo){
-    const t = normalizarTexto(tipo);
-    for(const o of reglas){ if(o.patrones.some(p=>t.includes(p))) return o.subtipo; }
-  }
-  return SUBTIPO_DEFAULT[categoria] || normalizarTexto(categoria) || 'general';
+// Derivar un molde a partir de una capa que ya quedó bien (el resultado
+// de "✋ Ajustar en maniquí"): el rectángulo real que ocupa esa prenda en
+// el lienzo ES el molde. Así el ajuste manual de una prenda se convierte
+// en la plantilla de todas las siguientes de su tipo.
+function reglaDesdeBbox(bboxPct, vAlign){
+  const v = vAlign==='bottom' ? 'bottom' : 'top';
+  return {
+    ancho: +(bboxPct.w).toFixed(2),
+    vAlign: v,
+    anclaY: +((v==='bottom' ? bboxPct.y + bboxPct.h : bboxPct.y)).toFixed(2),
+    xCentro: +((bboxPct.x + bboxPct.w/2)).toFixed(2)
+  };
 }
 const CLAVE_CANDIDATOS = [
   { nombre:'verde chroma-key',   hex:'#00FF00', hue:120 },
@@ -1078,17 +1116,26 @@ function escanearBboxAlfa(ctx, W, H){
 // justamente lo que se guarda como FotoGeneradaURL. Así el Vestidor
 // nunca tiene que calcular nada en tiempo real, solo superponer capas.
 function reposicionarCapa(dataUrl, bboxPct, categoria, tipo){
+  return reposicionarCapaConRegla(dataUrl, bboxPct, reglaAnclaParaPrenda(categoria, tipo));
+}
+// Misma matemática, pero recibiendo el molde ya resuelto — es lo que usan
+// el editor de moldes y "📐 Aplicar molde" para re-alinear capas que ya
+// existen, sin volver a pedirle nada a la IA. anclaY acepta número (% del
+// lienzo, como en los moldes) o el nombre de un ancla anatómica (como en
+// las reglas de categoría de siempre).
+function reposicionarCapaConRegla(dataUrl, bboxPct, regla){
   return new Promise(resolve=>{
     const img = new Image();
     img.onload = ()=>{
-      const regla = reglaAnclaParaPrenda(categoria, tipo);
       const W = MANIQUI_CANVAS.w, H = MANIQUI_CANVAS.h;
       const bboxMinX = bboxPct.x/100*W, bboxMinY = bboxPct.y/100*H;
       const bboxW = Math.max(1, bboxPct.w/100*W), bboxH = Math.max(1, bboxPct.h/100*H);
       const bboxMaxY = bboxMinY + bboxH;
       const scale = ((regla.ancho/100)*W) / bboxW;
-      const anclaYpx = (ANCLAS_MANIQUI[regla.anclaY]/100)*H;
-      const translateX = W*0.5 - (bboxMinX + bboxW/2)*scale;
+      const anclaYpct = (typeof regla.anclaY === 'number') ? regla.anclaY : ANCLAS_MANIQUI[regla.anclaY];
+      const anclaYpx = (anclaYpct/100)*H;
+      const xCentro = (typeof regla.xCentro === 'number') ? regla.xCentro/100 : 0.5;
+      const translateX = W*xCentro - (bboxMinX + bboxW/2)*scale;
       const translateY = regla.vAlign==='bottom' ? (anclaYpx - bboxMaxY*scale) : (anclaYpx - bboxMinY*scale);
       const canvas = document.createElement('canvas');
       canvas.width = W; canvas.height = H;
@@ -1103,6 +1150,52 @@ function reposicionarCapa(dataUrl, bboxPct, categoria, tipo){
     img.onerror = ()=> resolve(null);
     img.src = dataUrl;
   });
+}
+// Mide el rectángulo real (alfa) de una capa ya canónica. Se usa cuando
+// hay que re-alinear una prenda vieja y no se confía en su BBoxJSON (por
+// ejemplo prendas de antes de que existiera ese campo).
+function bboxDeCapaUrl(dataUrl){
+  return new Promise(resolve=>{
+    const img = new Image();
+    img.onload = ()=>{
+      const W = MANIQUI_CANVAS.w, H = MANIQUI_CANVAS.h;
+      const c = document.createElement('canvas');
+      c.width=W; c.height=H;
+      const ctx = c.getContext('2d');
+      const escala = Math.min(W/img.width, H/img.height);
+      const dw = img.width*escala, dh = img.height*escala;
+      ctx.drawImage(img, (W-dw)/2, (H-dh)/2, dw, dh);
+      resolve({ bbox: escanearBboxAlfa(ctx, W, H), dataUrl: c.toDataURL('image/png') });
+    };
+    img.onerror = ()=> resolve(null);
+    img.src = dataUrl;
+  });
+}
+// Re-alinea la capa que YA existe de una prenda al molde que le toca —
+// sin IA, sin volver a generar nada: solo se descarga el PNG actual, se
+// escala/traslada al molde y se vuelve a subir. Es la operación que hace
+// que ajustar un molde una vez arregle todas las prendas de ese tipo.
+async function realinearPrendaAMolde(p, regla){
+  if(!p.FotoGeneradaURL) return false;
+  const fileId = fileIdDeUrlDrive(p.FotoGeneradaURL);
+  if(!fileId) return false;
+  const r = await apiPost('descargarImagenDrive', { fileId });
+  if(!r.ok) return false;
+  const medido = await bboxDeCapaUrl('data:'+r.mimeType+';base64,'+r.base64);
+  if(!medido) return false;
+  const reposicionada = await reposicionarCapaConRegla(medido.dataUrl, medido.bbox, regla);
+  if(!reposicionada) return false;
+  const subida = await apiPost('uploadImage', { imageBase64: reposicionada.base64, mimeType:'image/png', fileName:'capa-molde-'+Date.now()+'.png' });
+  if(!subida.ok) return false;
+  const eraLaMostrada = (p.FotoURL === p.FotoGeneradaURL);
+  p.FotoGeneradaURL = subida.url;
+  if(eraLaMostrada) p.FotoURL = subida.url;
+  p.BBoxJSON = JSON.stringify(reposicionada.bboxPct);
+  await apiPost('saveRow', { table:'PRENDAS', row:p });
+  return true;
+}
+function prendasDelMolde(clave){
+  return DATA.prendas.filter(p=>!esVerdadero(p.Papelera) && p.FotoGeneradaURL && claveMoldeParaPrenda(p.Categoria, p.Tipo)===clave);
 }
 // Ajuste manual ("✋ Ajustar en maniquí", ver Editar prenda): parte de la
 // capa YA canónica (720x1280, ya sea la puesta automáticamente por
@@ -1130,65 +1223,6 @@ function aplicarAjusteManual(dataUrl, ajuste){
     img.src = dataUrl;
   });
 }
-// Sistema de plantillas: PLANTILLAS guarda, por Subtipo+Genero, la capa
-// que se usa como referencia de geometría fija (ver generarCapaConPlantilla
-// en el backend). "Perezoso": no hay una librería pre-hecha — la primera
-// prenda de un subtipo nuevo se genera libre (generarObtenerCapaGenerica
-// más abajo) y ESA se vuelve la plantilla para las siguientes.
-function buscarPlantilla(subtipo, genero){
-  return DATA.plantillas.find(x=>x.Subtipo===subtipo && x.Genero===genero) || null;
-}
-async function guardarPlantillaNueva(subtipo, genero, fotoUrl, bboxPct){
-  if(buscarPlantilla(subtipo, genero)) return; // no pisar una que ya exista
-  const row = { ID: uid(), Subtipo: subtipo, Genero: genero, FotoURL: fotoUrl, BBoxJSON: JSON.stringify(bboxPct) };
-  DATA.plantillas.push(row);
-  localStorage.setItem('ropa_data_cache', JSON.stringify(DATA));
-  await apiPost('saveRow', { table:'PLANTILLAS', row });
-}
-// Genera la capa de una prenda: si ya hay plantilla para su Subtipo+Genero,
-// la IA solo aporta color/diseño sobre esa geometría fija
-// (generarCapaConPlantilla); si no, cae al pipeline libre de siempre
-// (generarCapaPrenda con el maniquí como referencia) y, si el resultado
-// pasa la validación, ese mismo resultado se vuelve la plantilla nueva de
-// ese subtipo — así el sistema se "entrena" solo con la ropa real del
-// usuario en vez de necesitar una librería armada a mano de antemano.
-// Devuelve {dataUrl,base64,bboxPct} ya reposicionado, o null si falló.
-async function generarCapaPrendaHibrida(cropPreviewB64, categoria, tipo, color, colorSecundario, estampado, subtipo, genero, feedback){
-  const clave = await elegirColorClave('data:image/jpeg;base64,'+cropPreviewB64);
-  const plantilla = buscarPlantilla(subtipo, genero);
-  let recorte = null, esPlantillaNueva = false;
-  if(plantilla && plantilla.FotoURL){
-    const plantillaInfo = await base64DeFotoURL(plantilla.FotoURL);
-    if(plantillaInfo){
-      const gen = await apiPost('generarCapaConPlantilla', {
-        imageBase64: cropPreviewB64, mimeType:'image/jpeg',
-        categoria, tipo,
-        plantillaBase64: plantillaInfo.base64, plantillaMimeType: plantillaInfo.mimeType,
-        claveColorHex: clave.hex, claveColorNombre: clave.nombre, feedback
-      });
-      if(gen.ok) recorte = await quitarFondoColor('data:'+(gen.mimeType||'image/jpeg')+';base64,'+gen.imageBase64, clave.hex);
-    }
-  }
-  if(!recorte || !capaEsValida(recorte)){
-    const maniquiGenerico = await obtenerManiquiBase(genero);
-    if(maniquiGenerico){
-      const gen = await apiPost('generarCapaPrenda', {
-        imageBase64: cropPreviewB64, mimeType:'image/jpeg',
-        categoria, tipo, color, colorSecundario, estampado,
-        maniquiBase64: maniquiGenerico.base64, maniquiMimeType: maniquiGenerico.mimeType,
-        claveColorHex: clave.hex, claveColorNombre: clave.nombre, feedback
-      });
-      recorte = gen.ok ? await quitarFondoColor('data:'+(gen.mimeType||'image/jpeg')+';base64,'+gen.imageBase64, clave.hex) : null;
-      esPlantillaNueva = true;
-    }
-  }
-  if(!recorte || !capaEsValida(recorte)) return null;
-  const reposicionada = await reposicionarCapa(recorte.dataUrl, recorte.bboxPct, categoria, tipo);
-  const final = reposicionada || recorte;
-  final.claveColor = clave.nombre+' '+clave.hex;
-  final.esPlantillaNueva = esPlantillaNueva;
-  return final;
-}
 async function crearFilaPrenda(it, origenUrl){
   let fotoRealUrl = '';
   if(it.caja && it.cropPreview){
@@ -1196,24 +1230,45 @@ async function crearFilaPrenda(it, origenUrl){
     if(subCrop.ok) fotoRealUrl = subCrop.url;
   }
   let fotoGeneradaUrl = '', bboxJson = '', claveColor = '';
-  const subtipo = subtipoParaPrenda(it.categoria, it.tipo);
-  const genero = localStorage.getItem('ropa_maniqui_genero')||'mujer';
   if(it.cropPreview){
-    const final = await generarCapaPrendaHibrida(it.cropPreview.split(',')[1], it.categoria, it.tipo, it.color, it.colorSecundario, it.estampado, subtipo, genero);
-    if(final){
-      const subGen = await apiPost('uploadImage', { imageBase64: final.base64, mimeType:'image/png', fileName:'capa-'+Date.now()+'.png' });
-      if(subGen.ok){
-        fotoGeneradaUrl = subGen.url;
-        bboxJson = JSON.stringify(final.bboxPct);
-        claveColor = final.claveColor;
-        if(final.esPlantillaNueva) await guardarPlantillaNueva(subtipo, genero, subGen.url, final.bboxPct);
+    const clave = await elegirColorClave(it.cropPreview);
+    const genero = localStorage.getItem('ropa_maniqui_genero')||'mujer';
+    const maniqui = await obtenerManiquiBase(genero);
+    if(maniqui){
+      const gen = await apiPost('generarCapaPrenda', {
+        imageBase64: it.cropPreview.split(',')[1], mimeType:'image/jpeg',
+        categoria: it.categoria, tipo: it.tipo, color: it.color, colorSecundario: it.colorSecundario, estampado: it.estampado,
+        maniquiBase64: maniqui.base64, maniquiMimeType: maniqui.mimeType,
+        claveColorHex: clave.hex, claveColorNombre: clave.nombre
+      });
+      if(gen.ok){
+        const recorte = await quitarFondoColor('data:'+(gen.mimeType||'image/jpeg')+';base64,'+gen.imageBase64, clave.hex);
+        // Salvavidas: si el chroma-key no quitó bien el fondo (poco,
+        // demasiado, o dejó un bloque del color clave sin quitar en algún
+        // lado — probado en pruebas reales), mejor guardar sin capa que
+        // subir algo roto.
+        if(capaEsValida(recorte)){
+          // Enfoque híbrido determinista: la posición final la decide el
+          // código, con el MOLDE de su tipo (o la ancla de categoría si
+          // no hay molde) — no la referencia visual del maniquí que le
+          // mandamos a la IA, que ayuda a que la escala/forma salga bien
+          // pero no garantiza la posición exacta.
+          const reposicionada = await reposicionarCapa(recorte.dataUrl, recorte.bboxPct, it.categoria, it.tipo);
+          const final = reposicionada || recorte;
+          const subGen = await apiPost('uploadImage', { imageBase64: final.base64, mimeType:'image/png', fileName:'capa-'+Date.now()+'.png' });
+          if(subGen.ok){
+            fotoGeneradaUrl = subGen.url;
+            bboxJson = JSON.stringify(final.bboxPct);
+            claveColor = clave.nombre+' '+clave.hex;
+          }
+        }
       }
     }
   }
   return {
     ID: uid(), Categoria: it.categoria||'Ropa superior', Tipo: it.tipo||'', Color: it.color||'',
     ColorSecundario: it.colorSecundario||'', Estampado: it.estampado||'', Marca:'', Temporada:'',
-    Formalidad:'', FotoURL: fotoGeneradaUrl||fotoRealUrl||origenUrl||'', FotoGeneradaURL: fotoGeneradaUrl, BBoxJSON: bboxJson, ClaveColor: claveColor, Subtipo: subtipo, FotoRealURL: fotoRealUrl, FotoOrigenURL: origenUrl||'', FotoManiquiURL:'', FechaAlta: new Date().toISOString(),
+    Formalidad:'', FotoURL: fotoGeneradaUrl||fotoRealUrl||origenUrl||'', FotoGeneradaURL: fotoGeneradaUrl, BBoxJSON: bboxJson, ClaveColor: claveColor, FotoRealURL: fotoRealUrl, FotoOrigenURL: origenUrl||'', FotoManiquiURL:'', FechaAlta: new Date().toISOString(),
     UltimoUso:'', VecesUsado:0, Favorito:false, Notas:'', Papelera:false
   };
 }
@@ -1630,20 +1685,8 @@ function abrirVerPrenda(id){
   overlay.querySelector('#verCerrar').onclick = ()=> overlay.remove();
   overlay.querySelector('#verEditar').onclick = ()=>{ overlay.remove(); abrirEditarPrenda(id); };
 }
-// Opciones del <select> de Subtipo para una categoría — junta los
-// subtipos conocidos de esa categoría + el default + el valor actual
-// (por si es uno viejo/manual que no está en las listas de siempre), sin
-// repetidos.
-function opcionesSubtipoHtml(categoria, actual){
-  const reglas = SUBTIPOS_POR_CATEGORIA[categoria] || [];
-  const set = new Set(reglas.map(o=>o.subtipo));
-  set.add(SUBTIPO_DEFAULT[categoria] || 'general');
-  if(actual) set.add(actual);
-  return Array.from(set).map(s=>`<option ${s===actual?'selected':''}>${escAttr(s)}</option>`).join('');
-}
 function abrirEditarPrenda(id){
   const p = findPrenda(id); if(!p) return;
-  const subtipoActual = p.Subtipo || subtipoParaPrenda(p.Categoria, p.Tipo);
   const overlay = document.createElement('div');
   overlay.className = 'modal-overlay';
   overlay.innerHTML = `<div class="modal">
@@ -1651,14 +1694,12 @@ function abrirEditarPrenda(id){
     <div class="field" style="text-align:center">
       <div id="edFotoPreview">${fotoRecortadaHtml(p,{estilo:'width:100%;max-width:220px;margin:0 auto;border-radius:12px'})}</div>
       <div id="edFotoBotones" style="display:flex;gap:6px;flex-wrap:wrap;justify-content:center;margin-top:8px">${botonesFotoHtml(p)}</div>
-      ${p.FotoGeneradaURL ? `<button class="btn ghost" id="edUsarComoPlantilla" style="font-size:12px;padding:6px 10px;margin-top:6px">🎯 Usar esta capa como plantilla del subtipo</button>` : ''}
       <input type="text" id="edFeedback" placeholder="¿Algo que corregir? ej: sin cinto, mangas largas" style="margin-top:8px">
       <input type="file" id="edFileTienda" accept="image/*" style="display:none">
       <div id="edCropArea"></div>
     </div>
-    <div class="field"><label>Categoría</label><select id="edCat" onchange="document.getElementById('edSubtipo').innerHTML = opcionesSubtipoHtml(this.value, '')">${CATEGORIAS.map(c=>`<option ${c===p.Categoria?'selected':''}>${c}</option>`).join('')}</select></div>
+    <div class="field"><label>Categoría</label><select id="edCat">${CATEGORIAS.map(c=>`<option ${c===p.Categoria?'selected':''}>${c}</option>`).join('')}</select></div>
     <div class="field"><label>Tipo</label><input id="edTipo" value="${escAttr(p.Tipo||'')}"></div>
-    <div class="field"><label>Subtipo <span class="hint">(decide qué plantilla de geometría usa en el Vestidor)</span></label><select id="edSubtipo">${opcionesSubtipoHtml(p.Categoria, subtipoActual)}</select></div>
     <div class="field"><label>Color</label><input id="edColor" value="${escAttr(p.Color||'')}"></div>
     <div class="field"><label>Color secundario</label><input id="edColor2" value="${escAttr(p.ColorSecundario||'')}"></div>
     <div class="field"><label>Marca</label><input id="edMarca" value="${escAttr(p.Marca||'')}"></div>
@@ -1674,19 +1715,6 @@ function abrirEditarPrenda(id){
   overlay.addEventListener('click', e=>{ if(e.target===overlay) overlay.remove(); });
   overlay.querySelector('#edCancel').onclick = ()=> overlay.remove();
   cablearBotonesFoto(p);
-  const btnUsarPlantilla = document.getElementById('edUsarComoPlantilla');
-  if(btnUsarPlantilla) btnUsarPlantilla.onclick = async ()=>{
-    const subtipoElegido = document.getElementById('edSubtipo').value;
-    const genero = localStorage.getItem('ropa_maniqui_genero')||'mujer';
-    btnUsarPlantilla.disabled = true; btnUsarPlantilla.textContent = 'Guardando…';
-    const existente = DATA.plantillas.find(x=>x.Subtipo===subtipoElegido && x.Genero===genero);
-    const row = { ID: existente?existente.ID:uid(), Subtipo: subtipoElegido, Genero: genero, FotoURL: p.FotoGeneradaURL, BBoxJSON: p.BBoxJSON||'' };
-    if(existente) Object.assign(existente, row); else DATA.plantillas.push(row);
-    localStorage.setItem('ropa_data_cache', JSON.stringify(DATA));
-    await apiPost('saveRow', { table:'PLANTILLAS', row });
-    btnUsarPlantilla.disabled = false; btnUsarPlantilla.textContent = '🎯 Usar esta capa como plantilla del subtipo';
-    showToast(`Las próximas prendas nuevas de "${subtipoElegido}" (${genero}) van a copiar esta forma`);
-  };
   document.getElementById('edFileTienda').onchange = async (e)=>{
     const files = e.target.files; if(!files.length) return;
     showToast('Subiendo foto de tienda…');
@@ -1704,7 +1732,6 @@ function abrirEditarPrenda(id){
   overlay.querySelector('#edGuardar').onclick = async ()=>{
     p.Categoria = overlay.querySelector('#edCat').value;
     p.Tipo = overlay.querySelector('#edTipo').value;
-    p.Subtipo = overlay.querySelector('#edSubtipo').value;
     p.Color = overlay.querySelector('#edColor').value;
     p.ColorSecundario = overlay.querySelector('#edColor2').value;
     p.Marca = overlay.querySelector('#edMarca').value;
@@ -1725,6 +1752,7 @@ function botonesFotoHtml(p){
     (p.FotoRealURL && p.FotoURL!==p.FotoRealURL ? `<button class="btn ghost" id="edUsarReal" style="font-size:12px;padding:6px 10px">📸 Usar foto real</button>` : '') +
     `<button class="btn ghost" id="edRegenerar" style="font-size:12px;padding:6px 10px">🔄 Regenerar</button>` +
     (p.FotoGeneradaURL ? `<button class="btn ghost" id="edAjustarManiqui" style="font-size:12px;padding:6px 10px">✋ Ajustar en maniquí</button>` : '') +
+    (p.FotoGeneradaURL && claveMoldeParaPrenda(p.Categoria, p.Tipo) ? `<button class="btn ghost" id="edAplicarMolde" style="font-size:12px;padding:6px 10px" title="Reacomoda esta capa en el molde de '${escAttr(nombreMoldeParaPrenda(p.Categoria,p.Tipo))}' — no usa IA, solo la escala y la mueve">📐 Aplicar molde</button>` : '') +
     `<button class="btn ghost" id="edRecortar" style="font-size:12px;padding:6px 10px">✂️ Recortar</button>` +
     `<button class="btn ghost" id="edSubirTienda" style="font-size:12px;padding:6px 10px">📤 Subir foto de tienda</button>`;
 }
@@ -1747,6 +1775,18 @@ function cablearBotonesFoto(p){
   if(btnRegen) btnRegen.onclick = ()=> regenerarFotoPrenda(p);
   const btnAjustar = document.getElementById('edAjustarManiqui');
   if(btnAjustar) btnAjustar.onclick = ()=> abrirAjustarManiqui(p);
+  const btnMolde = document.getElementById('edAplicarMolde');
+  if(btnMolde) btnMolde.onclick = async ()=>{
+    const clave = claveMoldeParaPrenda(p.Categoria, p.Tipo);
+    if(!clave) return;
+    btnMolde.disabled = true; btnMolde.textContent = 'Aplicando…';
+    const ok = await realinearPrendaAMolde(p, reglaMolde(clave));
+    btnMolde.disabled = false; btnMolde.textContent = '📐 Aplicar molde';
+    if(!ok){ showToast('No se pudo aplicar el molde (revisa la conexión)'); return; }
+    localStorage.setItem('ropa_data_cache', JSON.stringify(DATA));
+    renderCatalogo(); refrescarFotoModal(p);
+    showToast('Puesta en el molde de "'+moldeBase(clave).nombre+'"');
+  };
   const btnRecortar = document.getElementById('edRecortar');
   if(btnRecortar) btnRecortar.onclick = async ()=>{
     const fileId = fileIdDeUrlDrive(p.FotoRealURL) || fileIdDeUrlDrive(p.FotoOrigenURL) || fileIdDeUrlDrive(p.FotoURL);
@@ -1787,22 +1827,31 @@ async function regenerarFotoPrenda(p){
 // — corre el pipeline completo de capa nueva (color clave + generarCapaPrenda
 // + quitarFondoColor) sobre una imagen que ya se tiene en memoria como dataURL.
 async function regenerarCapaDesdeImagen(p, dataUrl, feedback, btn, textoBtnNormal){
-  const subtipo = p.Subtipo || subtipoParaPrenda(p.Categoria, p.Tipo);
+  const clave = await elegirColorClave(dataUrl);
   const genero = localStorage.getItem('ropa_maniqui_genero')||'mujer';
-  const final = await generarCapaPrendaHibrida(dataUrl.split(',')[1], p.Categoria, p.Tipo, p.Color, p.ColorSecundario, p.Estampado, subtipo, genero, feedback);
-  if(!final){
-    showToast('No se pudo generar: el resultado no quedó bien (fondo mal quitado o chocó con la prenda) — intenta de nuevo');
+  const maniqui = await obtenerManiquiBase(genero);
+  if(!maniqui){ showToast('No se pudo preparar el maniquí'); if(btn){ btn.disabled=false; btn.textContent=textoBtnNormal; } return false; }
+  const gen = await apiPost('generarCapaPrenda', {
+    imageBase64: dataUrl.split(',')[1], mimeType:'image/jpeg',
+    categoria: p.Categoria, tipo: p.Tipo, color: p.Color, colorSecundario: p.ColorSecundario, estampado: p.Estampado,
+    maniquiBase64: maniqui.base64, maniquiMimeType: maniqui.mimeType,
+    claveColorHex: clave.hex, claveColorNombre: clave.nombre, feedback
+  });
+  if(!gen.ok){ showToast('No se pudo generar: '+(gen.error||'')); if(btn){ btn.disabled=false; btn.textContent=textoBtnNormal; } return false; }
+  const recorte = await quitarFondoColor('data:'+(gen.mimeType||'image/jpeg')+';base64,'+gen.imageBase64, clave.hex);
+  if(!capaEsValida(recorte)){
+    showToast('El resultado no quedó bien (fondo mal quitado o chocó con la prenda) — intenta de nuevo');
     if(btn){ btn.disabled=false; btn.textContent=textoBtnNormal; }
     return false;
   }
+  const reposicionada = await reposicionarCapa(recorte.dataUrl, recorte.bboxPct, p.Categoria, p.Tipo);
+  const final = reposicionada || recorte;
   const subGen = await apiPost('uploadImage', { imageBase64: final.base64, mimeType:'image/png', fileName:'capa-'+Date.now()+'.png' });
   if(!subGen.ok){ showToast('No se pudo guardar la imagen generada'); if(btn){ btn.disabled=false; btn.textContent=textoBtnNormal; } return false; }
   p.FotoGeneradaURL = subGen.url;
   p.FotoURL = subGen.url;
   p.BBoxJSON = JSON.stringify(final.bboxPct);
-  p.ClaveColor = final.claveColor;
-  p.Subtipo = subtipo;
-  if(final.esPlantillaNueva) await guardarPlantillaNueva(subtipo, genero, subGen.url, final.bboxPct);
+  p.ClaveColor = clave.nombre+' '+clave.hex;
   await apiPost('saveRow', { table:'PRENDAS', row:p });
   localStorage.setItem('ropa_data_cache', JSON.stringify(DATA));
   renderCatalogo();
@@ -1822,6 +1871,7 @@ async function abrirAjustarManiqui(p){
   if(!p.FotoGeneradaURL){ showToast('Esta prenda todavía no tiene una capa para ajustar'); return; }
   const genero = localStorage.getItem('ropa_maniqui_genero')||'mujer';
   ajusteManiqui = { p, dx:0, dy:0, scale:1 };
+  const moldeClaveAjuste = claveMoldeParaPrenda(p.Categoria, p.Tipo);
   const overlay = document.createElement('div');
   overlay.className = 'modal-overlay';
   overlay.id = 'ajustarManiquiOverlay';
@@ -1834,6 +1884,10 @@ async function abrirAjustarManiqui(p){
       <button class="chip" onclick="ajustarManiquiEscala(0.05)">➕ Más grande</button>
       <button class="chip" onclick="ajustarManiquiReset()">↺ Reiniciar</button>
     </div>
+    ${moldeClaveAjuste ? `<label class="hint" style="display:flex;gap:8px;align-items:flex-start;margin-top:12px;background:var(--accent-soft);padding:10px;border-radius:10px;cursor:pointer">
+      <input type="checkbox" id="ajustarGuardarMolde" checked style="width:auto;margin-top:2px">
+      <span>Guardar esto como el <b>molde de "${escAttr(moldeBase(moldeClaveAjuste).nombre)}"</b> — todas las prendas nuevas de este tipo van a caer justo aquí, sin volver a ajustarlas.</span>
+    </label>` : `<p class="hint" style="margin-top:12px">Este ajuste se guarda solo en esta prenda (su tipo no coincide con ningún molde; puedes editar los moldes en Perfil).</p>`}
     <div class="actions">
       <button class="btn ghost" id="ajustarCancelar">Cancelar</button>
       <button class="btn" id="ajustarGuardar">💾 Guardar ajuste</button>
@@ -1898,13 +1952,30 @@ async function guardarAjusteManiqui(){
   p.FotoURL = subida.url;
   p.BBoxJSON = JSON.stringify(resultado.bboxPct);
   await apiPost('saveRow', { table:'PRENDAS', row:p });
+  // La prenda que acaba de quedar bien se vuelve el molde de su tipo: el
+  // rectángulo que ocupa AHORA es exactamente lo que queremos que ocupen
+  // las próximas playeras / faldas largas / botas, etc.
+  const chk = document.getElementById('ajustarGuardarMolde');
+  const clave = claveMoldeParaPrenda(p.Categoria, p.Tipo);
+  let guardoMolde = false;
+  if(chk && chk.checked && clave){
+    const base = moldeBase(clave);
+    MOLDES_USUARIO[clave] = reglaDesdeBbox(resultado.bboxPct, base.regla.vAlign);
+    guardarMoldesUsuario();
+    guardoMolde = true;
+  }
   localStorage.setItem('ropa_data_cache', JSON.stringify(DATA));
   renderCatalogo();
   refrescarFotoModal(p);
   const overlay = document.getElementById('ajustarManiquiOverlay');
   if(overlay) overlay.remove();
   ajusteManiqui = null;
-  showToast('Ajuste guardado');
+  if(guardoMolde){
+    const otras = prendasDelMolde(clave).filter(x=>x.ID!==p.ID).length;
+    showToast('Molde de "'+moldeBase(clave).nombre+'" guardado'+(otras?' — puedes re-alinear las otras '+otras+' en Perfil → Moldes':''));
+  } else {
+    showToast('Ajuste guardado');
+  }
 }
 function fileIdDeUrlDrive(url){
   const m = String(url||'').match(/[?&]id=([^&]+)/);
@@ -2380,7 +2451,213 @@ function renderPerfilScreen(){
   document.getElementById('chipManiquiHombre').classList.toggle('active', genero==='hombre');
   document.getElementById('perfilVersionTexto').textContent = BUILD_VERSION;
   document.getElementById('perfilNotas').value = p.Notas || '';
+  renderMoldes();
   renderFotosSubidas();
+}
+// ------------------------------------------------------------
+//  Moldes del maniquí (Perfil)
+// ------------------------------------------------------------
+function renderMoldes(){
+  const cont = document.getElementById('moldesArea');
+  if(!cont) return;
+  const grupos = [];
+  MOLDES_BASE.forEach(m=>{
+    let g = grupos.find(x=>x.nombre===m.grupo);
+    if(!g){ g = { nombre:m.grupo, moldes:[] }; grupos.push(g); }
+    g.moldes.push(m);
+  });
+  const ajustados = Object.keys(MOLDES_USUARIO).length;
+  cont.innerHTML =
+    `<p class="hint" style="margin-bottom:8px">${ajustados ? ajustados+' molde(s) ajustados por ti · el resto usa el valor de fábrica' : 'Todos los moldes están en su valor de fábrica'}</p>` +
+    grupos.map(g=>
+      `<div style="margin-top:12px"><div class="hint" style="text-transform:uppercase;letter-spacing:.5px;font-size:11px;margin-bottom:4px">${escAttr(g.nombre)}</div>` +
+      g.moldes.map(m=>{
+        const r = reglaMolde(m.clave);
+        const n = prendasDelMolde(m.clave).length;
+        const tocado = moldeEstaAjustado(m.clave);
+        return `<div class="capa-row" style="flex-wrap:wrap;gap:6px">
+          <div class="capa-row-info">
+            <b>${escAttr(m.nombre)}</b>${tocado?' <span style="color:var(--accent)">✎ ajustado</span>':''}
+            <br><span class="hint">ancho ${r.ancho}% · ${r.vAlign==='bottom'?'pies en':'arriba en'} ${r.anclaY}% · ${n} prenda(s)</span>
+          </div>
+          <button class="btn ghost" style="font-size:12px;padding:6px 10px" onclick="abrirEditorMolde('${m.clave}')">📐 Ajustar</button>
+          ${tocado?`<button class="btn ghost" style="font-size:12px;padding:6px 10px" onclick="resetMolde('${m.clave}')">↺</button>`:''}
+        </div>`;
+      }).join('') + `</div>`
+    ).join('');
+}
+function resetMolde(clave){
+  delete MOLDES_USUARIO[clave];
+  guardarMoldesUsuario();
+  renderMoldes();
+  showToast('Molde de "'+moldeBase(clave).nombre+'" de vuelta al original');
+}
+// Editor visual del molde: se ve el maniquí real con una prenda real de
+// ese tipo encima (o, si todavía no hay ninguna, solo la guía punteada).
+// Arrastrar mueve el molde, ➕/➖ lo agrandan — es la MISMA matemática que
+// usa reposicionarCapaConRegla, solo que en CSS para que sea instantáneo.
+let editorMolde = null;
+async function abrirEditorMolde(clave){
+  const base = moldeBase(clave);
+  if(!base) return;
+  const prendas = prendasDelMolde(clave).filter(p=>{
+    try{ const b = JSON.parse(p.BBoxJSON||'null'); return b && b.w>0 && b.h>0; }catch(e){ return false; }
+  });
+  editorMolde = { clave, regla: Object.assign({}, reglaMolde(clave)), prendas, idx:0 };
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay';
+  overlay.id = 'editorMoldeOverlay';
+  overlay.innerHTML = `<div class="modal">
+    <h3>Molde: ${escAttr(base.nombre)}</h3>
+    <p class="hint">Deja la prenda justo donde quieres que caigan TODAS las de este tipo. Arrástrala para moverla y usa los botones para el tamaño.</p>
+    <div class="maniqui-doll-wrap" id="moldeWrap" style="max-width:240px"><p class="hint" style="padding:60px 0;text-align:center">Cargando…</p></div>
+    <div class="chips" style="justify-content:center;margin-top:10px">
+      <button class="chip" onclick="editorMoldeEscala(-1)">➖ Más chica</button>
+      <button class="chip" onclick="editorMoldeEscala(1)">➕ Más grande</button>
+      <button class="chip" onclick="editorMoldeAlinear()">↕️ Anclar por <span id="moldeAlinearTxt"></span></button>
+      <button class="chip" onclick="editorMoldeReset()">↺ Original</button>
+    </div>
+    <p class="hint" id="moldeInfo" style="text-align:center;margin-top:6px"></p>
+    <p class="hint" id="moldeCambiarPrenda" style="text-align:center"></p>
+    <div class="actions">
+      <button class="btn ghost" id="moldeCancelar">Cancelar</button>
+      <button class="btn" id="moldeGuardar">💾 Guardar molde</button>
+    </div>
+    <p class="hint" id="moldeReaplicarArea" style="margin-top:10px"></p>
+  </div>`;
+  document.body.appendChild(overlay);
+  const cerrar = ()=>{ overlay.remove(); editorMolde=null; };
+  overlay.addEventListener('click', e=>{ if(e.target===overlay) cerrar(); });
+  overlay.querySelector('#moldeCancelar').onclick = cerrar;
+  overlay.querySelector('#moldeGuardar').onclick = guardarEditorMolde;
+  const genero = localStorage.getItem('ropa_maniqui_genero')||'mujer';
+  const maniqui = await obtenerManiquiBase(genero);
+  const wrap = document.getElementById('moldeWrap');
+  if(!wrap) return;
+  if(!maniqui || !maniqui.url){ wrap.innerHTML = '<p class="hint">No se pudo cargar el maniquí.</p>'; return; }
+  wrap.innerHTML = `<img class="maniqui-doll-base" src="${maniqui.url}">` +
+    (prendas.length ? `<img class="maniqui-doll-capa-full" id="moldeImg" src="${prendas[0].FotoGeneradaURL}" style="cursor:grab;touch-action:none;transform-origin:0 0">` : '') +
+    `<div id="moldeGuia" style="position:absolute;border:2px dashed var(--accent);border-radius:6px;pointer-events:none;opacity:.75"></div>`;
+  if(prendas.length>1){
+    document.getElementById('moldeCambiarPrenda').innerHTML = `Probando con una de tus ${prendas.length} prendas de este tipo · <a href="javascript:void(0)" onclick="editorMoldeSiguientePrenda()">ver otra</a>`;
+  } else if(!prendas.length){
+    document.getElementById('moldeCambiarPrenda').textContent = 'Todavía no tienes prendas de este tipo — el recuadro punteado te muestra dónde caerán.';
+  }
+  cablearArrastreMolde();
+  pintarEditorMolde();
+}
+function bboxPrendaEditor(){
+  if(!editorMolde || !editorMolde.prendas.length) return null;
+  try{ return JSON.parse(editorMolde.prendas[editorMolde.idx].BBoxJSON); }catch(e){ return null; }
+}
+// Transformación del molde en CSS: con transform-origin 0 0, un punto p
+// del lienzo (en %) cae en T + s*p — exactamente lo que hace en canvas
+// reposicionarCapaConRegla, así que lo que se ve aquí es lo que se guarda.
+function pintarEditorMolde(){
+  if(!editorMolde) return;
+  const r = editorMolde.regla;
+  const b = bboxPrendaEditor();
+  const img = document.getElementById('moldeImg');
+  if(img && b){
+    const s = r.ancho / b.w;
+    const tx = r.xCentro - (b.x + b.w/2)*s;
+    const ty = (r.vAlign==='bottom') ? r.anclaY - (b.y + b.h)*s : r.anclaY - b.y*s;
+    img.style.transform = `translate(${tx}%, ${ty}%) scale(${s})`;
+  }
+  const guia = document.getElementById('moldeGuia');
+  if(guia){
+    const altoGuia = b ? (b.h * (r.ancho/b.w)) : 18;
+    guia.style.left = (r.xCentro - r.ancho/2)+'%';
+    guia.style.width = r.ancho+'%';
+    guia.style.top = (r.vAlign==='bottom' ? r.anclaY - altoGuia : r.anclaY)+'%';
+    guia.style.height = altoGuia+'%';
+  }
+  const info = document.getElementById('moldeInfo');
+  if(info) info.textContent = `ancho ${r.ancho.toFixed(1)}% · ${r.vAlign==='bottom'?'pies':'borde de arriba'} en ${r.anclaY.toFixed(1)}%`;
+  const txt = document.getElementById('moldeAlinearTxt');
+  if(txt) txt.textContent = r.vAlign==='bottom' ? 'arriba' : 'abajo';
+}
+function cablearArrastreMolde(){
+  const img = document.getElementById('moldeImg');
+  const wrap = document.getElementById('moldeWrap');
+  if(!img || !wrap) return;
+  let inicio = null;
+  img.addEventListener('pointerdown', e=>{
+    inicio = { x:e.clientX, y:e.clientY, anclaY:editorMolde.regla.anclaY, xCentro:editorMolde.regla.xCentro };
+    img.setPointerCapture(e.pointerId);
+    img.style.cursor='grabbing';
+  });
+  img.addEventListener('pointermove', e=>{
+    if(!inicio || !editorMolde) return;
+    const rect = wrap.getBoundingClientRect();
+    editorMolde.regla.xCentro = Math.max(0, Math.min(100, inicio.xCentro + (e.clientX-inicio.x)/rect.width*100));
+    editorMolde.regla.anclaY  = Math.max(0, Math.min(100, inicio.anclaY  + (e.clientY-inicio.y)/rect.height*100));
+    pintarEditorMolde();
+  });
+  img.addEventListener('pointerup', ()=>{ inicio=null; img.style.cursor='grab'; });
+}
+function editorMoldeEscala(dir){
+  if(!editorMolde) return;
+  editorMolde.regla.ancho = Math.max(4, Math.min(100, editorMolde.regla.ancho + dir*1.5));
+  pintarEditorMolde();
+}
+function editorMoldeAlinear(){
+  if(!editorMolde) return;
+  const r = editorMolde.regla, b = bboxPrendaEditor();
+  // Cambiar de "anclar por arriba" a "anclar por abajo" no debe mover la
+  // prenda: se recalcula el ancla al otro borde del mismo rectángulo.
+  if(b){
+    const s = r.ancho/b.w, alto = b.h*s;
+    r.anclaY = r.vAlign==='bottom' ? r.anclaY - alto : r.anclaY + alto;
+  }
+  r.vAlign = r.vAlign==='bottom' ? 'top' : 'bottom';
+  pintarEditorMolde();
+}
+function editorMoldeReset(){
+  if(!editorMolde) return;
+  editorMolde.regla = Object.assign({}, moldeBase(editorMolde.clave).regla);
+  pintarEditorMolde();
+}
+function editorMoldeSiguientePrenda(){
+  if(!editorMolde || !editorMolde.prendas.length) return;
+  editorMolde.idx = (editorMolde.idx+1) % editorMolde.prendas.length;
+  const img = document.getElementById('moldeImg');
+  if(img) img.src = editorMolde.prendas[editorMolde.idx].FotoGeneradaURL;
+  pintarEditorMolde();
+}
+function guardarEditorMolde(){
+  if(!editorMolde) return;
+  const { clave, regla, prendas } = editorMolde;
+  MOLDES_USUARIO[clave] = { ancho:+regla.ancho.toFixed(2), vAlign:regla.vAlign, anclaY:+regla.anclaY.toFixed(2), xCentro:+regla.xCentro.toFixed(2) };
+  guardarMoldesUsuario();
+  renderMoldes();
+  const area = document.getElementById('moldeReaplicarArea');
+  if(area && prendas.length){
+    area.innerHTML = `✅ Molde guardado — de aquí en adelante toda prenda nueva de este tipo cae aquí sola.<br>
+      <button class="btn secondary" style="margin-top:8px" id="moldeReaplicarBtn">📐 Re-alinear mis ${prendas.length} prenda(s) de este tipo</button>`;
+    document.getElementById('moldeReaplicarBtn').onclick = ()=> reaplicarMoldeATipo(clave);
+  } else if(area){
+    area.innerHTML = '✅ Molde guardado.';
+  }
+  showToast('Molde guardado');
+}
+// Re-alinear todo un tipo de golpe: no vuelve a generar nada con IA, solo
+// reacomoda las capas que ya existen — por eso es barato y se puede
+// repetir las veces que haga falta hasta que el molde quede perfecto.
+async function reaplicarMoldeATipo(clave){
+  const lista = prendasDelMolde(clave);
+  if(!lista.length) return;
+  const btn = document.getElementById('moldeReaplicarBtn');
+  const regla = reglaMolde(clave);
+  let ok = 0;
+  for(let i=0;i<lista.length;i++){
+    if(btn){ btn.disabled = true; btn.textContent = `Re-alineando ${i+1}/${lista.length}…`; }
+    if(await realinearPrendaAMolde(lista[i], regla)) ok++;
+  }
+  localStorage.setItem('ropa_data_cache', JSON.stringify(DATA));
+  renderCatalogo();
+  if(btn){ btn.disabled = false; btn.textContent = `📐 Re-alinear mis ${lista.length} prenda(s) de este tipo`; }
+  showToast(ok===lista.length ? `Listo: ${ok} prenda(s) en el molde` : `${ok} de ${lista.length} re-alineadas (revisa la conexión)`);
 }
 // El género elegido aquí decide qué maniquí base se usa en todo el
 // Vestidor (Ideas y, si hace falta regenerarlo, el armador). Se deja
