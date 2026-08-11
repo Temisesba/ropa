@@ -321,7 +321,7 @@ let SHEET_URL = '';
 // Nombre-landmark de esta versión — cámbialo en cada cambio que se
 // despliegue, así se puede saber a simple vista (en Perfil) si el
 // celular ya está viendo lo último o una copia vieja en caché.
-const BUILD_VERSION = 'Irapuato';
+const BUILD_VERSION = 'Jalapa';
 let DATA = { prendas: [], usos: [], outfits_sugeridos: [], perfil: [], fotos_origen: [] };
 let showTrash = false;
 let soloFavoritos = false;
@@ -1706,6 +1706,8 @@ function abrirEditarPrenda(id){
       <div id="edFotoPreview">${fotoRecortadaHtml(p,{estilo:'width:100%;max-width:220px;margin:0 auto;border-radius:12px'})}</div>
       <div id="edFotoBotones" style="display:flex;gap:6px;flex-wrap:wrap;justify-content:center;margin-top:8px">${botonesFotoHtml(p)}</div>
       <input type="text" id="edFeedback" placeholder="¿Algo que corregir? ej: sin cinto, mangas largas" style="margin-top:8px">
+      <button class="btn ghost" id="edMarcarZona" style="font-size:12px;padding:6px 10px;margin-top:6px">✏️ Marcar zona a quitar</button>
+      <p class="hint" id="edMarcaEstado"></p>
       <div id="edPreviewCandidata"></div>
       <input type="file" id="edFileTienda" accept="image/*" style="display:none">
       <div id="edCropArea"></div>
@@ -1727,6 +1729,8 @@ function abrirEditarPrenda(id){
   overlay.addEventListener('click', e=>{ if(e.target===overlay) overlay.remove(); });
   overlay.querySelector('#edCancel').onclick = ()=> overlay.remove();
   cablearBotonesFoto(p);
+  document.getElementById('edMarcarZona').onclick = ()=> abrirMarcarZona(p);
+  actualizarEstadoMarca(p);
   document.getElementById('edFileTienda').onchange = async (e)=>{
     const files = e.target.files; if(!files.length) return;
     showToast('Subiendo foto de tienda…');
@@ -1823,20 +1827,94 @@ function refrescarFotoModal(p){
   if(cont){ cont.innerHTML = botonesFotoHtml(p); cablearBotonesFoto(p); }
 }
 async function regenerarFotoPrenda(p){
-  const fileId = fileIdDeUrlDrive(p.FotoRealURL) || fileIdDeUrlDrive(p.FotoOrigenURL) || fileIdDeUrlDrive(p.FotoURL);
-  if(!fileId){ showToast('No hay una foto real de esta prenda para generar desde ahí'); return; }
   const btn = document.getElementById('edRegenerar');
   if(btn){ btn.disabled = true; btn.textContent = 'Generando…'; }
-  const r = await apiPost('descargarImagenDrive', { fileId });
-  if(!r.ok){ showToast('No se pudo cargar la foto: '+(r.error||'sin conexión')); if(btn){ btn.disabled=false; btn.textContent='🔄 Regenerar'; } return; }
   const feedbackEl = document.getElementById('edFeedback');
   const feedback = feedbackEl ? feedbackEl.value.trim() : '';
-  const dataUrl = 'data:'+r.mimeType+';base64,'+r.base64;
-  const candidata = await generarCapaCandidata(p, dataUrl, feedback, btn, '🔄 Regenerar');
+  // Si el usuario marcó una zona a quitar, esa foto (con el trazo rojo ya
+  // dibujado encima) se manda en vez de re-descargar una copia limpia —
+  // es justo la referencia visual que necesita la IA para saber qué quitar.
+  const usaMarca = marcaPendiente && marcaPendiente.prendaId===p.ID;
+  let dataUrl;
+  if(usaMarca){
+    dataUrl = marcaPendiente.dataUrl;
+  } else {
+    const fileId = fileIdDeUrlDrive(p.FotoRealURL) || fileIdDeUrlDrive(p.FotoOrigenURL) || fileIdDeUrlDrive(p.FotoURL);
+    if(!fileId){ showToast('No hay una foto real de esta prenda para generar desde ahí'); if(btn){ btn.disabled=false; btn.textContent='🔄 Regenerar'; } return; }
+    const r = await apiPost('descargarImagenDrive', { fileId });
+    if(!r.ok){ showToast('No se pudo cargar la foto: '+(r.error||'sin conexión')); if(btn){ btn.disabled=false; btn.textContent='🔄 Regenerar'; } return; }
+    dataUrl = 'data:'+r.mimeType+';base64,'+r.base64;
+  }
+  const candidata = await generarCapaCandidata(p, dataUrl, feedback, btn, '🔄 Regenerar', usaMarca);
   if(btn){ btn.disabled=false; btn.textContent='🔄 Regenerar'; }
   if(!candidata) return;
   if(feedbackEl) feedbackEl.value = '';
+  if(usaMarca){ marcaPendiente = null; actualizarEstadoMarca(p); }
   mostrarPreviewCandidata(p, candidata);
+}
+// Estado de "marca a quitar" pendiente — una por prenda, se usa una sola
+// vez (al regenerar) y se limpia sola después.
+let marcaPendiente = null;
+function actualizarEstadoMarca(p){
+  const el = document.getElementById('edMarcaEstado');
+  if(!el) return;
+  const activa = marcaPendiente && marcaPendiente.prendaId===p.ID;
+  el.innerHTML = activa ? '✏️ Zona marcada — se usará la próxima vez que le des "🔄 Regenerar". <a href="javascript:void(0)" onclick="marcaPendiente=null;actualizarEstadoMarca(findPrenda(\''+p.ID+'\'))">quitar marca</a>' : '';
+}
+// Deja dibujar (dedo o mouse) directo sobre la foto real de la prenda para
+// señalar qué quitar (ej. un logo, una mancha) — más directo que describirlo
+// en texto. El trazo se pinta en rojo y se manda tal cual como referencia
+// junto con la instrucción de que lo marcado en rojo debe desaparecer.
+async function abrirMarcarZona(p){
+  const fileId = fileIdDeUrlDrive(p.FotoRealURL) || fileIdDeUrlDrive(p.FotoOrigenURL) || fileIdDeUrlDrive(p.FotoURL);
+  if(!fileId){ showToast('No hay una foto real de esta prenda para marcar'); return; }
+  showToast('Cargando foto…');
+  const r = await apiPost('descargarImagenDrive', { fileId });
+  if(!r.ok){ showToast('No se pudo cargar la foto: '+(r.error||'sin conexión')); return; }
+  const resized = await imagenDesdeBase64(r.base64, r.mimeType, 900);
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay';
+  overlay.innerHTML = `<div class="modal">
+    <h3>Marcar zona a quitar</h3>
+    <p class="hint">Dibuja encima de lo que quieres que la IA quite (ej. un logo, una mancha).</p>
+    <div style="position:relative;max-width:280px;margin:0 auto">
+      <canvas id="marcaCanvas" style="width:100%;touch-action:none;border-radius:10px;display:block"></canvas>
+    </div>
+    <div class="chips" style="justify-content:center;margin-top:10px">
+      <button class="chip" id="marcaBorrar">🧹 Borrar trazo</button>
+    </div>
+    <div class="actions">
+      <button class="btn ghost" id="marcaCancelar">Cancelar</button>
+      <button class="btn" id="marcaListo">✅ Listo</button>
+    </div>
+  </div>`;
+  document.body.appendChild(overlay);
+  const canvas = document.getElementById('marcaCanvas');
+  canvas.width = resized.width; canvas.height = resized.height;
+  const ctx = canvas.getContext('2d');
+  ctx.drawImage(resized.canvas, 0, 0);
+  ctx.strokeStyle = '#ff0000'; ctx.lineWidth = Math.max(4, resized.width*0.02); ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+  let dibujando = false, ultimo = null;
+  const posEnCanvas = e=>{
+    const rect = canvas.getBoundingClientRect();
+    return { x:(e.clientX-rect.left)/rect.width*canvas.width, y:(e.clientY-rect.top)/rect.height*canvas.height };
+  };
+  canvas.addEventListener('pointerdown', e=>{ dibujando=true; ultimo=posEnCanvas(e); canvas.setPointerCapture(e.pointerId); });
+  canvas.addEventListener('pointermove', e=>{
+    if(!dibujando) return;
+    const pos = posEnCanvas(e);
+    ctx.beginPath(); ctx.moveTo(ultimo.x, ultimo.y); ctx.lineTo(pos.x, pos.y); ctx.stroke();
+    ultimo = pos;
+  });
+  canvas.addEventListener('pointerup', ()=> dibujando=false);
+  document.getElementById('marcaBorrar').onclick = ()=>{ ctx.clearRect(0,0,canvas.width,canvas.height); ctx.drawImage(resized.canvas,0,0); };
+  document.getElementById('marcaCancelar').onclick = ()=> overlay.remove();
+  document.getElementById('marcaListo').onclick = ()=>{
+    marcaPendiente = { prendaId: p.ID, dataUrl: canvas.toDataURL('image/jpeg', 0.92) };
+    overlay.remove();
+    actualizarEstadoMarca(p);
+    showToast('Zona marcada — dale "🔄 Regenerar" para aplicarla');
+  };
 }
 // Muestra el resultado de la IA como PROPUESTA, sin guardarlo todavía —
 // el usuario decide si lo usa o lo descarta y se queda con la foto de
@@ -1880,7 +1958,7 @@ async function aplicarCapaCandidata(p, candidata){
 // + quitarFondoColor) sobre una imagen que ya se tiene en memoria como dataURL.
 // Sube el resultado a Drive (para poder mostrarlo como preview) pero NO lo
 // guarda todavía en la prenda — eso lo hace aplicarCapaCandidata, aparte.
-async function generarCapaCandidata(p, dataUrl, feedback, btn, textoBtnNormal){
+async function generarCapaCandidata(p, dataUrl, feedback, btn, textoBtnNormal, tieneMarcas){
   const clave = await elegirColorClave(dataUrl);
   const genero = localStorage.getItem('ropa_maniqui_genero')||'mujer';
   const maniqui = await obtenerManiquiBase(genero);
@@ -1889,7 +1967,7 @@ async function generarCapaCandidata(p, dataUrl, feedback, btn, textoBtnNormal){
     imageBase64: dataUrl.split(',')[1], mimeType:'image/jpeg',
     categoria: p.Categoria, tipo: p.Tipo, color: p.Color, colorSecundario: p.ColorSecundario, estampado: p.Estampado,
     maniquiBase64: maniqui.base64, maniquiMimeType: maniqui.mimeType,
-    claveColorHex: clave.hex, claveColorNombre: clave.nombre, feedback
+    claveColorHex: clave.hex, claveColorNombre: clave.nombre, feedback, tieneMarcas
   });
   if(!gen.ok){ showToast('No se pudo generar: '+(gen.error||'')); return null; }
   const recorte = await quitarFondoColor('data:'+(gen.mimeType||'image/jpeg')+';base64,'+gen.imageBase64, clave.hex);
@@ -1927,6 +2005,8 @@ async function abrirAjustarManiqui(p){
       <button class="chip" onclick="ajustarManiquiEscala(0.05)">➕ Más grande</button>
       <button class="chip" onclick="ajustarManiquiReset()">↺ Reiniciar</button>
     </div>
+    <input type="range" id="ajustarEscalaSlider" min="30" max="300" step="1" value="100" style="width:100%;margin-top:8px" oninput="ajustarManiquiEscalaSlider(this.value)">
+    <p class="hint" id="ajustarEscalaTxt" style="text-align:center">Tamaño: 100%</p>
     ${moldeClaveAjuste ? `<label class="hint" style="display:flex;gap:8px;align-items:flex-start;margin-top:12px;background:var(--accent-soft);padding:10px;border-radius:10px;cursor:pointer">
       <input type="checkbox" id="ajustarGuardarMolde" checked style="width:auto;margin-top:2px">
       <span>Guardar esto como el <b>molde de "${escAttr(moldeBase(moldeClaveAjuste).nombre)}"</b> — todas las prendas nuevas de este tipo van a caer justo aquí, sin volver a ajustarlas.</span>
@@ -1967,10 +2047,23 @@ function aplicarTransformAjuste(){
   const img = document.getElementById('ajustarImg');
   if(!img || !ajusteManiqui) return;
   img.style.transform = `translate(${ajusteManiqui.dx}%, ${ajusteManiqui.dy}%) scale(${ajusteManiqui.scale})`;
+  const slider = document.getElementById('ajustarEscalaSlider');
+  const txt = document.getElementById('ajustarEscalaTxt');
+  const pct = Math.round(ajusteManiqui.scale*100);
+  if(slider) slider.value = pct;
+  if(txt) txt.textContent = 'Tamaño: '+pct+'%';
 }
 function ajustarManiquiEscala(delta){
   if(!ajusteManiqui) return;
   ajusteManiqui.scale = Math.max(0.3, Math.min(3, ajusteManiqui.scale+delta));
+  aplicarTransformAjuste();
+}
+// El deslizador permite llegar a un punto intermedio exacto — los botones
+// ➖/➕ saltan de 5 en 5% y a veces ese paso se pasa de largo de donde se
+// quería quedar (reportado: "se va muy allá o muy acá").
+function ajustarManiquiEscalaSlider(valor){
+  if(!ajusteManiqui) return;
+  ajusteManiqui.scale = Math.max(0.3, Math.min(3, Number(valor)/100));
   aplicarTransformAjuste();
 }
 function ajustarManiquiReset(){
@@ -2602,6 +2695,7 @@ async function abrirEditorMolde(clave){
       <button class="chip" onclick="editorMoldeAlinear()">↕️ Anclar por <span id="moldeAlinearTxt"></span></button>
       <button class="chip" onclick="editorMoldeReset()">↺ Original</button>
     </div>
+    <input type="range" id="moldeEscalaSlider" min="4" max="100" step="0.5" style="width:100%;margin-top:8px" oninput="editorMoldeEscalaSlider(this.value)">
     <p class="hint" id="moldeInfo" style="text-align:center;margin-top:6px"></p>
     <p class="hint" id="moldeCambiarPrenda" style="text-align:center"></p>
     <div class="actions">
@@ -2661,6 +2755,8 @@ function pintarEditorMolde(){
   if(info) info.textContent = `ancho ${r.ancho.toFixed(1)}% · ${r.vAlign==='bottom'?'pies':'borde de arriba'} en ${r.anclaY.toFixed(1)}%`;
   const txt = document.getElementById('moldeAlinearTxt');
   if(txt) txt.textContent = r.vAlign==='bottom' ? 'arriba' : 'abajo';
+  const slider = document.getElementById('moldeEscalaSlider');
+  if(slider) slider.value = r.ancho;
 }
 function cablearArrastreMolde(){
   const img = document.getElementById('moldeImg');
@@ -2684,6 +2780,14 @@ function cablearArrastreMolde(){
 function editorMoldeEscala(dir){
   if(!editorMolde) return;
   editorMolde.regla.ancho = Math.max(4, Math.min(100, editorMolde.regla.ancho + dir*1.5));
+  pintarEditorMolde();
+}
+// El deslizador llega a cualquier punto intermedio — los botones ➖/➕
+// saltan de 1.5 en 1.5% y a veces ese paso se pasa del tamaño que se
+// quería (reportado: "se va muy allá o muy acá").
+function editorMoldeEscalaSlider(valor){
+  if(!editorMolde) return;
+  editorMolde.regla.ancho = Math.max(4, Math.min(100, Number(valor)));
   pintarEditorMolde();
 }
 function editorMoldeAlinear(){
