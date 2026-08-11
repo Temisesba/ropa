@@ -321,7 +321,7 @@ let SHEET_URL = '';
 // Nombre-landmark de esta versión — cámbialo en cada cambio que se
 // despliegue, así se puede saber a simple vista (en Perfil) si el
 // celular ya está viendo lo último o una copia vieja en caché.
-const BUILD_VERSION = 'Hermosillo';
+const BUILD_VERSION = 'Irapuato';
 let DATA = { prendas: [], usos: [], outfits_sugeridos: [], perfil: [], fotos_origen: [] };
 let showTrash = false;
 let soloFavoritos = false;
@@ -1706,6 +1706,7 @@ function abrirEditarPrenda(id){
       <div id="edFotoPreview">${fotoRecortadaHtml(p,{estilo:'width:100%;max-width:220px;margin:0 auto;border-radius:12px'})}</div>
       <div id="edFotoBotones" style="display:flex;gap:6px;flex-wrap:wrap;justify-content:center;margin-top:8px">${botonesFotoHtml(p)}</div>
       <input type="text" id="edFeedback" placeholder="¿Algo que corregir? ej: sin cinto, mangas largas" style="margin-top:8px">
+      <div id="edPreviewCandidata"></div>
       <input type="file" id="edFileTienda" accept="image/*" style="display:none">
       <div id="edCropArea"></div>
     </div>
@@ -1831,45 +1832,76 @@ async function regenerarFotoPrenda(p){
   const feedbackEl = document.getElementById('edFeedback');
   const feedback = feedbackEl ? feedbackEl.value.trim() : '';
   const dataUrl = 'data:'+r.mimeType+';base64,'+r.base64;
-  const ok = await regenerarCapaDesdeImagen(p, dataUrl, feedback, btn, '🔄 Regenerar');
-  if(ok && feedbackEl) feedbackEl.value = '';
+  const candidata = await generarCapaCandidata(p, dataUrl, feedback, btn, '🔄 Regenerar');
+  if(btn){ btn.disabled=false; btn.textContent='🔄 Regenerar'; }
+  if(!candidata) return;
+  if(feedbackEl) feedbackEl.value = '';
+  mostrarPreviewCandidata(p, candidata);
+}
+// Muestra el resultado de la IA como PROPUESTA, sin guardarlo todavía —
+// el usuario decide si lo usa o lo descarta y se queda con la foto de
+// antes (pedido explícito: "si no le doy guardar que no se guarde").
+function mostrarPreviewCandidata(p, candidata){
+  const cont = document.getElementById('edPreviewCandidata');
+  if(!cont) return;
+  cont.innerHTML = `<p class="hint" style="margin-top:10px">Propuesta nueva — ¿la usamos?</p>
+    <img src="${candidata.url}" style="width:100%;max-width:220px;margin:0 auto;display:block;border-radius:12px;background:var(--accent-soft)">
+    <div class="chips" style="justify-content:center;margin-top:8px">
+      <button class="chip" id="edUsarCandidata">✅ Usar esta</button>
+      <button class="chip" id="edDescartarCandidata">✖ Descartar</button>
+    </div>`;
+  document.getElementById('edUsarCandidata').onclick = async ()=>{
+    await aplicarCapaCandidata(p, candidata);
+    cont.innerHTML = '';
+    refrescarFotoModal(p);
+    showToast('Guardado');
+  };
+  document.getElementById('edDescartarCandidata').onclick = ()=>{
+    cont.innerHTML = '';
+    showToast('Descartado — se queda la foto de antes');
+  };
+}
+// Aplica y persiste una capa candidata ya generada (subida a Drive, sin
+// tocar aún la prenda) — el "guardar" real de la propuesta.
+async function aplicarCapaCandidata(p, candidata){
+  p.FotoGeneradaURL = candidata.url;
+  p.FotoURL = candidata.url;
+  p.BBoxJSON = JSON.stringify(candidata.bboxPct);
+  p.ClaveColor = candidata.claveTexto;
+  await apiPost('saveRow', { table:'PRENDAS', row:p });
+  localStorage.setItem('ropa_data_cache', JSON.stringify(DATA));
+  renderCatalogo();
+  const vestidorCont = document.getElementById('vestidorPreview');
+  if(vestidorCont){ const base = vestidorCont.querySelector('.maniqui-doll-base'); vestidorCont.innerHTML = (base?base.outerHTML:'') + capasHtml(); }
+  renderCapasLista();
 }
 // Compartido por "🔄 Regenerar" y por recortar-y-regenerar (confirmarRecorteEdicion)
 // — corre el pipeline completo de capa nueva (color clave + generarCapaPrenda
 // + quitarFondoColor) sobre una imagen que ya se tiene en memoria como dataURL.
-async function regenerarCapaDesdeImagen(p, dataUrl, feedback, btn, textoBtnNormal){
+// Sube el resultado a Drive (para poder mostrarlo como preview) pero NO lo
+// guarda todavía en la prenda — eso lo hace aplicarCapaCandidata, aparte.
+async function generarCapaCandidata(p, dataUrl, feedback, btn, textoBtnNormal){
   const clave = await elegirColorClave(dataUrl);
   const genero = localStorage.getItem('ropa_maniqui_genero')||'mujer';
   const maniqui = await obtenerManiquiBase(genero);
-  if(!maniqui){ showToast('No se pudo preparar el maniquí'); if(btn){ btn.disabled=false; btn.textContent=textoBtnNormal; } return false; }
+  if(!maniqui){ showToast('No se pudo preparar el maniquí'); return null; }
   const gen = await apiPost('generarCapaPrenda', {
     imageBase64: dataUrl.split(',')[1], mimeType:'image/jpeg',
     categoria: p.Categoria, tipo: p.Tipo, color: p.Color, colorSecundario: p.ColorSecundario, estampado: p.Estampado,
     maniquiBase64: maniqui.base64, maniquiMimeType: maniqui.mimeType,
     claveColorHex: clave.hex, claveColorNombre: clave.nombre, feedback
   });
-  if(!gen.ok){ showToast('No se pudo generar: '+(gen.error||'')); if(btn){ btn.disabled=false; btn.textContent=textoBtnNormal; } return false; }
+  if(!gen.ok){ showToast('No se pudo generar: '+(gen.error||'')); return null; }
   const recorte = await quitarFondoColor('data:'+(gen.mimeType||'image/jpeg')+';base64,'+gen.imageBase64, clave.hex);
   if(!capaEsValida(recorte, p.Categoria)){
     showToast('El resultado no quedó bien (fondo mal quitado o chocó con la prenda) — intenta de nuevo');
-    if(btn){ btn.disabled=false; btn.textContent=textoBtnNormal; }
-    return false;
+    return null;
   }
   const reposicionada = await reposicionarCapa(recorte.dataUrl, recorte.bboxPct, p.Categoria, p.Tipo);
   const final = reposicionada || recorte;
   const subGen = await apiPost('uploadImage', { imageBase64: final.base64, mimeType:'image/png', fileName:'capa-'+Date.now()+'.png' });
-  if(!subGen.ok){ showToast('No se pudo guardar la imagen generada'); if(btn){ btn.disabled=false; btn.textContent=textoBtnNormal; } return false; }
-  p.FotoGeneradaURL = subGen.url;
-  p.FotoURL = subGen.url;
-  p.BBoxJSON = JSON.stringify(final.bboxPct);
-  p.ClaveColor = clave.nombre+' '+clave.hex;
-  await apiPost('saveRow', { table:'PRENDAS', row:p });
-  localStorage.setItem('ropa_data_cache', JSON.stringify(DATA));
-  renderCatalogo();
-  refrescarFotoModal(p);
-  if(btn){ btn.disabled=false; btn.textContent=textoBtnNormal; }
-  showToast('Foto regenerada');
-  return true;
+  if(!subGen.ok){ showToast('No se pudo guardar la imagen generada'); return null; }
+  return { url: subGen.url, bboxPct: final.bboxPct, claveTexto: clave.nombre+' '+clave.hex };
 }
 // "✋ Ajustar en maniquí" — corrección fina manual sobre lo que puso el
 // sistema de anclas automático (ver reposicionarCapa). Arrastrar/escalar
@@ -2025,8 +2057,10 @@ async function confirmarRecorteEdicion(p, recortada){
   p.FotoRealURL = subida.url;
   p.FotoURL = subida.url;
   document.getElementById('edCropArea').innerHTML = '<p class="hint">Generando capa de catálogo…</p>';
-  await regenerarCapaDesdeImagen(p, recortada.dataUrl || ('data:'+recortada.mimeType+';base64,'+recortada.base64), '', null, '');
+  const candidata = await generarCapaCandidata(p, recortada.dataUrl || ('data:'+recortada.mimeType+';base64,'+recortada.base64), '', null, '');
+  if(candidata) await aplicarCapaCandidata(p, candidata);
   document.getElementById('edCropArea').innerHTML = '';
+  refrescarFotoModal(p);
 }
 
 // ============================================================
