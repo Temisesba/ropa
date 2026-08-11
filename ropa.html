@@ -321,7 +321,7 @@ let SHEET_URL = '';
 // Nombre-landmark de esta versión — cámbialo en cada cambio que se
 // despliegue, así se puede saber a simple vista (en Perfil) si el
 // celular ya está viendo lo último o una copia vieja en caché.
-const BUILD_VERSION = 'Chiapas';
+const BUILD_VERSION = 'Colima';
 let DATA = { prendas: [], usos: [], outfits_sugeridos: [], perfil: [], fotos_origen: [] };
 let showTrash = false;
 let soloFavoritos = false;
@@ -1093,7 +1093,12 @@ function quitarFondoColor(dataUrl, claveHex, tolerancia){
 // bolso cruzado generado con el maniquí desnudo completo debajo, que pasó
 // las demás validaciones porque el fondo SÍ se quitó bien alrededor del
 // cuerpo — el problema no era el color, era el contenido).
-const CATEGORIA_ALTURA_MAX = { Bolsos: 55, Accesorios: 55, Calzado: 40 };
+// Calzado NO lleva tope: no hay evidencia real de que traiga el cuerpo
+// completo (el problema visto ahí era otro — un bloque de fondo mal
+// quitado, no un maniquí de cuerpo entero) y un tope puesto sin prueba
+// real terminó rechazando botas que antes se generaban bien (reportado
+// por el usuario) — quitado hasta tener evidencia real de ese caso.
+const CATEGORIA_ALTURA_MAX = { Bolsos: 55, Accesorios: 55 };
 function capaEsValida(recorte, categoria){
   if(!recorte) return false;
   if(recorte.ancho!==MANIQUI_CANVAS.w || recorte.alto!==MANIQUI_CANVAS.h) return false;
