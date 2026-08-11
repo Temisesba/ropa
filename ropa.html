@@ -123,6 +123,19 @@ nav.tabbar button .ic{font-size:19px}
 .maniqui-arrow.left{left:-10px}
 .maniqui-arrow.right{right:-10px}
 
+/* Vestidor, vista "en maniquí": las mismas fotos de la vista de arriba,
+   pero superpuestas por CSS sobre un maniquí de cuerpo completo en las
+   zonas donde iría cada prenda — como recortar ropa de papel y ponerla
+   sobre un dibujo de persona. No genera nada nuevo, solo reacomoda con
+   CSS lo que ya existe (ver renderVestidorPreview). */
+.maniqui-doll-wrap{position:relative;max-width:280px;aspect-ratio:280/450;margin:10px auto 0}
+.maniqui-doll-base{position:absolute;inset:0;width:100%;height:100%;object-fit:contain;z-index:1}
+.maniqui-doll-capa{position:absolute;display:flex;align-items:center;justify-content:center;z-index:2}
+.maniqui-doll-capa img{max-width:100%;max-height:100%;object-fit:contain;cursor:zoom-in;filter:drop-shadow(0 3px 6px rgba(0,0,0,.3))}
+.maniqui-doll-capa.superior{top:10%;left:16%;width:68%;height:36%;z-index:3}
+.maniqui-doll-capa.inferior{top:38%;left:18%;width:64%;height:48%;z-index:2}
+.maniqui-doll-capa.calzado{top:82%;left:28%;width:44%;height:16%;z-index:4}
+
 /* outfits */
 .outfit-card{background:var(--bg-card);border-radius:var(--radius);box-shadow:var(--shadow);padding:14px;margin-top:12px}
 .outfit-idea-img{min-height:60px;display:flex;align-items:center;justify-content:center}
@@ -1448,7 +1461,7 @@ async function usarOutfitHoy(prendaIds){
 //  imagen); las Ideas (abajo, ver pedirSugerencias) son las que sí valen
 //  la pena generar como imagen sobre un maniquí, una por combinación.
 // ============================================================
-let outfitBoard = null; // { superior, inferior, calzado, extras:Set }
+let outfitBoard = null; // { superior, inferior, calzado, extras:Set, vista:'capas'|'maniqui' }
 function itemsParaSlot(slot){
   const activos = DATA.prendas.filter(p=>!esVerdadero(p.Papelera));
   if(slot==='superior') return activos.filter(p=>p.Categoria==='Ropa superior'||p.Categoria==='Vestidos');
@@ -1461,7 +1474,7 @@ function itemsParaExtras(){
 }
 function abrirVestidor(){
   if(!outfitBoard){
-    outfitBoard = { superior:null, inferior:null, calzado:null, extras:new Set() };
+    outfitBoard = { superior:null, inferior:null, calzado:null, extras:new Set(), vista: localStorage.getItem('ropa_vestidor_vista')||'maniqui' };
     ['superior','inferior','calzado'].forEach(slot=>{
       const items = itemsParaSlot(slot);
       if(items.length) outfitBoard[slot] = items[0].ID;
@@ -1473,15 +1486,20 @@ function toggleExtraOutfit(id){
   if(outfitBoard.extras.has(id)) outfitBoard.extras.delete(id); else outfitBoard.extras.add(id);
   renderTableroOutfit();
 }
+function cambiarVistaVestidor(v){
+  outfitBoard.vista = v;
+  localStorage.setItem('ropa_vestidor_vista', v);
+  renderTableroOutfit();
+}
 function renderTableroOutfit(){
   const area = document.getElementById('tableroOutfitArea');
   const extras = itemsParaExtras();
   area.innerHTML = `
-    <div class="vestidor-stack">
-      ${renderCapaOutfit('superior')}
-      ${renderCapaOutfit('inferior')}
-      ${renderCapaOutfit('calzado')}
+    <div class="chips" style="justify-content:center">
+      <button class="chip ${outfitBoard.vista==='maniqui'?'active':''}" onclick="cambiarVistaVestidor('maniqui')">🧍 En maniquí</button>
+      <button class="chip ${outfitBoard.vista==='capas'?'active':''}" onclick="cambiarVistaVestidor('capas')">🗂️ Solo prendas</button>
     </div>
+    <div id="vestidorPreview"></div>
     <p class="hint" style="text-align:center" id="resumenOutfit"></p>
     ${extras.length ? `<p class="hint" style="margin-top:10px">Agregar (opcional):</p>
     <div class="chips" style="flex-wrap:wrap">${extras.map(p=>`<button class="chip ${outfitBoard.extras.has(p.ID)?'active':''}" onclick="toggleExtraOutfit('${p.ID}')">${CATEGORIA_ICONO[p.Categoria]} ${escAttr(p.Tipo||p.Categoria)}</button>`).join('')}</div>` : ''}
@@ -1491,11 +1509,50 @@ function renderTableroOutfit(){
     </div>
     <div id="feedbackOutfitArea"></div>
   `;
-  ['superior','inferior','calzado'].forEach(slot=>{
-    const cont = document.getElementById('capaOutfit_'+slot);
-    if(cont) habilitarSwipeCapa(cont, slot);
-  });
+  renderVestidorPreview();
   actualizarResumenOutfit();
+}
+// Vista "capas": 3 cuadros apilados, cada uno la foto ya generada de la
+// prenda activa — instantáneo, sin maniquí de fondo. Vista "maniqui": las
+// MISMAS fotos, sin generar nada nuevo, superpuestas por CSS sobre un
+// maniquí de cuerpo completo (el mismo que ya se cachea para Ideas) en la
+// zona donde iría cada una — efecto "recortar ropa de papel y ponérsela a
+// un dibujo". Si el maniquí no carga, cae de vuelta a "capas".
+async function renderVestidorPreview(){
+  const cont = document.getElementById('vestidorPreview');
+  if(!cont) return;
+  if(outfitBoard.vista==='maniqui'){
+    cont.innerHTML = '<div class="maniqui-doll-wrap"><p class="hint" style="padding:60px 0;text-align:center">Cargando maniquí…</p></div>';
+    const genero = localStorage.getItem('ropa_maniqui_genero')||'mujer';
+    const maniqui = await obtenerManiquiBase(genero);
+    if(outfitBoard.vista!=='maniqui') return; // el usuario ya cambió de vista mientras cargaba
+    if(!maniqui || !maniqui.url){
+      showToast('No se pudo cargar el maniquí, mostrando solo las prendas');
+      outfitBoard.vista = 'capas';
+      renderTableroOutfit();
+      return;
+    }
+    cont.innerHTML = `<div class="maniqui-doll-wrap">
+      <img class="maniqui-doll-base" src="${maniqui.url}">
+      ${renderCapaDoll('superior', 29)}
+      ${renderCapaDoll('inferior', 61)}
+      ${renderCapaDoll('calzado', 89)}
+    </div>`;
+    ['superior','inferior','calzado'].forEach(slot=>{
+      const el = document.getElementById('doll_'+slot);
+      if(el) habilitarSwipeCapa(el, slot);
+    });
+  } else {
+    cont.innerHTML = `<div class="vestidor-stack">
+      ${renderCapaOutfit('superior')}
+      ${renderCapaOutfit('inferior')}
+      ${renderCapaOutfit('calzado')}
+    </div>`;
+    ['superior','inferior','calzado'].forEach(slot=>{
+      const el = document.getElementById('capaOutfit_'+slot);
+      if(el) habilitarSwipeCapa(el, slot);
+    });
+  }
 }
 function renderCapaOutfit(slot){
   const nombreCat = { superior:'Arriba', inferior:'Abajo', calzado:'Calzado' };
@@ -1513,17 +1570,39 @@ function renderCapaOutfit(slot){
     ${flechas?`<button class="maniqui-arrow right" onclick="cambiarPrenda('${slot}',1)">›</button>`:''}
   </div>`;
 }
+// Misma prenda activa que renderCapaOutfit, pero posicionada en la zona
+// del cuerpo que le toca sobre el maniquí en vez de en su propio cuadro
+// — las flechas van pegadas a los bordes del maniquí, a la altura de esa
+// zona (arrowTop), como en renderCapaOutfit pero sin caja propia.
+function renderCapaDoll(slot, arrowTop){
+  const items = itemsParaSlot(slot);
+  if(!items.length) return `<div class="maniqui-doll-capa ${slot}" id="doll_${slot}"></div>`;
+  if(!items.find(x=>x.ID===outfitBoard[slot])) outfitBoard[slot] = items[0].ID;
+  const p = items.find(x=>x.ID===outfitBoard[slot]);
+  const flechas = items.length>1;
+  return `${flechas?`<button class="maniqui-arrow left" style="top:${arrowTop}%" onclick="cambiarPrenda('${slot}',-1)">‹</button>`:''}
+    <div class="maniqui-doll-capa ${slot}" id="doll_${slot}">
+      ${p.FotoURL?`<img src="${p.FotoURL}" onclick="verFotoGrande('${p.FotoURL}')">`:''}
+    </div>
+    ${flechas?`<button class="maniqui-arrow right" style="top:${arrowTop}%" onclick="cambiarPrenda('${slot}',1)">›</button>`:''}`;
+}
 function cambiarPrenda(slot, delta){
   const items = itemsParaSlot(slot);
   if(!items.length) return;
   const idxActual = items.findIndex(p=>p.ID===outfitBoard[slot]);
   const idxNuevo = idxActual<0 ? 0 : (idxActual+delta+items.length)%items.length;
-  outfitBoard[slot] = items[idxNuevo].ID;
-  const cont = document.getElementById('capaOutfit_'+slot);
-  if(cont){
-    cont.outerHTML = renderCapaOutfit(slot);
-    const nuevo = document.getElementById('capaOutfit_'+slot);
-    if(nuevo) habilitarSwipeCapa(nuevo, slot);
+  const p = items[idxNuevo];
+  outfitBoard[slot] = p.ID;
+  if(outfitBoard.vista==='maniqui'){
+    const cont = document.getElementById('doll_'+slot);
+    if(cont) cont.innerHTML = p.FotoURL ? `<img src="${p.FotoURL}" onclick="verFotoGrande('${p.FotoURL}')">` : '';
+  } else {
+    const cont = document.getElementById('capaOutfit_'+slot);
+    if(cont){
+      cont.outerHTML = renderCapaOutfit(slot);
+      const nuevo = document.getElementById('capaOutfit_'+slot);
+      if(nuevo) habilitarSwipeCapa(nuevo, slot);
+    }
   }
   actualizarResumenOutfit();
 }
