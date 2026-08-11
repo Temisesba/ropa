@@ -338,7 +338,7 @@ let SHEET_URL = '';
 // Nombre-landmark de esta versión — cámbialo en cada cambio que se
 // despliegue, así se puede saber a simple vista (en Perfil) si el
 // celular ya está viendo lo último o una copia vieja en caché.
-const BUILD_VERSION = 'Veracruz';
+const BUILD_VERSION = 'Xalapa2';
 let DATA = { prendas: [], usos: [], outfits_sugeridos: [], perfil: [], fotos_origen: [] };
 let showTrash = false;
 let soloFavoritos = false;
@@ -3386,7 +3386,7 @@ function renderFotosSubidas(){
     return `<div class="detect-card" style="align-items:flex-start;flex-wrap:wrap">
       <img src="${f.URL}" onclick="verFotoGrande('${f.URL}')" style="width:64px;height:64px;object-fit:cover;border-radius:8px;cursor:zoom-in;flex:none">
       <div class="fields" style="grid-template-columns:1fr;flex:1">
-        <div style="display:flex;gap:6px;flex-wrap:wrap">${prendas.length ? prendas.map(p=>`<div style="width:44px;cursor:pointer" onclick="abrirVerPrenda('${p.ID}')" title="${escAttr(p.Tipo||p.Categoria)}">${fotoRecortadaHtml(p,{estilo:'width:44px;height:44px;object-fit:cover;border-radius:6px', clickable:false, iconoTam:16})}</div>`).join('') : '<span class="hint">Sin prendas activas de esta foto</span>'}</div>
+        <div style="display:flex;gap:6px;flex-wrap:wrap">${prendas.length ? prendas.map(p=>`<div style="width:44px;cursor:pointer" onclick="abrirCambiarPrendaDeFoto('${p.ID}','${f.URL}')" title="${escAttr(p.Tipo||p.Categoria)}">${fotoRecortadaHtml(p,{estilo:'width:44px;height:44px;object-fit:cover;border-radius:6px', clickable:false, iconoTam:16})}</div>`).join('') : '<span class="hint">Sin prendas activas de esta foto</span>'}</div>
         <input type="date" value="${fechaInput}" onchange="guardarFechaFotoOrigen('${f.URL}',this.value)">
       </div>
       <button class="btn ghost" style="font-size:12px;padding:6px 10px" onclick="abrirAgregarPrendaAFoto('${f.URL}')">➕ Agregar</button>
@@ -3399,16 +3399,18 @@ function renderFotosSubidas(){
 // repetida a ciegas, deja elegir de las que YA existen en el catálogo
 // (por si esa prenda se dio de alta desde otra foto) y solo la vincula
 // a esta — "de casualidad ya lo agregué en otro" era el caso explícito.
-function abrirAgregarPrendaAFoto(url){
+// "reemplazarId" (opcional) es la prenda que se está sustituyendo — al
+// elegir la nueva, la vieja se desvincula de esta foto (no se borra).
+function abrirAgregarPrendaAFoto(url, reemplazarId){
   const cats = CATEGORIAS.filter(c=>itemsPorCategoria(c).length);
   if(!cats.length){ showToast('Todavía no tienes prendas en el catálogo'); return; }
   const overlay = document.createElement('div');
   overlay.className = 'modal-overlay';
   overlay.innerHTML = `<div class="modal">
-    <h3>Agregar prenda a esta foto</h3>
-    <p class="hint">Si la prenda que falta ya existe en tu catálogo (la diste de alta desde otra foto), selecciónala aquí en vez de crear una repetida. Si no existe todavía, cierra esto y usa "🔍 Analizar" para que la IA la detecte de esta foto.</p>
+    <h3>${reemplazarId ? 'Cambiar por otra prenda' : 'Agregar prenda a esta foto'}</h3>
+    <p class="hint">${reemplazarId ? 'Elige la prenda que la va a reemplazar en esta foto (la anterior no se borra, solo se desvincula de aquí).' : 'Si la prenda que falta ya existe en tu catálogo (la diste de alta desde otra foto), selecciónala aquí en vez de crear una repetida. Si no existe todavía, cierra esto y usa "🔍 Analizar" para que la IA la detecte de esta foto.'}</p>
     <div class="chips" id="agregarFotoTabs" style="flex-wrap:wrap">
-      ${cats.map((c,i)=>`<button class="chip ${i===0?'active':''}" data-cat="${escAttr(c)}" onclick="mostrarCategoriaAgregarFoto('${escAttr(c)}','${url}')">${CATEGORIA_ICONO[c]} ${c}</button>`).join('')}
+      ${cats.map((c,i)=>`<button class="chip ${i===0?'active':''}" data-cat="${escAttr(c)}" onclick="mostrarCategoriaAgregarFoto('${escAttr(c)}','${url}','${reemplazarId||''}')">${CATEGORIA_ICONO[c]} ${c}</button>`).join('')}
     </div>
     <div class="grid" id="agregarFotoGrid"></div>
     <div class="actions"><button class="btn ghost" id="agregarFotoCerrar">Cerrar</button></div>
@@ -3416,26 +3418,60 @@ function abrirAgregarPrendaAFoto(url){
   document.body.appendChild(overlay);
   overlay.addEventListener('click', e=>{ if(e.target===overlay) overlay.remove(); });
   overlay.querySelector('#agregarFotoCerrar').onclick = ()=> overlay.remove();
-  mostrarCategoriaAgregarFoto(cats[0], url);
+  mostrarCategoriaAgregarFoto(cats[0], url, reemplazarId);
 }
-function mostrarCategoriaAgregarFoto(cat, url){
+function mostrarCategoriaAgregarFoto(cat, url, reemplazarId){
   document.querySelectorAll('#agregarFotoTabs .chip').forEach(b=> b.classList.toggle('active', b.dataset.cat===cat));
   const grid = document.getElementById('agregarFotoGrid');
   if(!grid) return;
   const items = itemsPorCategoria(cat);
-  grid.innerHTML = items.map(p=>`<div class="card" style="cursor:pointer" onclick="vincularPrendaAFoto('${p.ID}','${url}')">
+  grid.innerHTML = items.map(p=>`<div class="card" style="cursor:pointer" onclick="vincularPrendaAFoto('${p.ID}','${url}','${reemplazarId||''}')">
     ${fotoRecortadaHtml(p,{estilo:'width:100%', clickable:false})}
     <div class="body"><div class="tipo">${escAttr(p.Tipo||p.Categoria)}${p.FotoOrigenURL===url?' ✅ ya vinculada':''}</div></div>
   </div>`).join('');
 }
-async function vincularPrendaAFoto(id, url){
+async function vincularPrendaAFoto(id, url, reemplazarId){
   const p = findPrenda(id); if(!p) return;
+  if(reemplazarId && reemplazarId!==id){
+    const anterior = findPrenda(reemplazarId);
+    if(anterior){ anterior.FotoOrigenURL = ''; await apiPost('saveRow', { table:'PRENDAS', row:anterior }); }
+  }
   p.FotoOrigenURL = url;
   await apiPost('saveRow', { table:'PRENDAS', row:p });
   localStorage.setItem('ropa_data_cache', JSON.stringify(DATA));
   document.querySelectorAll('.modal-overlay').forEach(o=>o.remove());
   renderFotosSubidas();
   showToast('Prenda agregada a esta foto');
+}
+// Menú rápido al tocar una miniatura ya asociada a la foto — pedido
+// explícito: poder cambiarla por otra prenda del catálogo cuando esa foto
+// en particular salió mejor con otra prenda, no solo agregar nuevas.
+function abrirCambiarPrendaDeFoto(prendaId, url){
+  const p = findPrenda(prendaId); if(!p) return;
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay';
+  overlay.innerHTML = `<div class="modal">
+    <h3>${escAttr(p.Tipo||p.Categoria)}</h3>
+    <div class="chips" style="flex-direction:column;align-items:stretch">
+      <button class="btn ghost" id="cambiarVer">👁️ Ver prenda</button>
+      <button class="btn ghost" id="cambiarOtra">🔄 Cambiar por otra del catálogo</button>
+      <button class="btn ghost" id="cambiarQuitar">✕ Quitar de esta foto</button>
+    </div>
+    <div class="actions"><button class="btn ghost" id="cambiarCerrar">Cerrar</button></div>
+  </div>`;
+  document.body.appendChild(overlay);
+  overlay.addEventListener('click', e=>{ if(e.target===overlay) overlay.remove(); });
+  overlay.querySelector('#cambiarCerrar').onclick = ()=> overlay.remove();
+  overlay.querySelector('#cambiarVer').onclick = ()=>{ overlay.remove(); abrirVerPrenda(prendaId); };
+  overlay.querySelector('#cambiarOtra').onclick = ()=>{ overlay.remove(); abrirAgregarPrendaAFoto(url, prendaId); };
+  overlay.querySelector('#cambiarQuitar').onclick = async ()=>{
+    overlay.remove();
+    p.FotoOrigenURL = '';
+    await apiPost('saveRow', { table:'PRENDAS', row:p });
+    localStorage.setItem('ropa_data_cache', JSON.stringify(DATA));
+    renderFotosSubidas();
+    showToast('Quitada de esta foto');
+  };
 }
 // El historial de cada prenda ahora lee la fecha directo de su fila real
 // en USOS (no de FOTOS_ORIGEN) — así que corregir la fecha aquí tiene que
