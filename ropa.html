@@ -351,7 +351,7 @@ let SHEET_URL = '';
 // Nombre-landmark de esta versión — cámbialo en cada cambio que se
 // despliegue, así se puede saber a simple vista (en Perfil) si el
 // celular ya está viendo lo último o una copia vieja en caché.
-const BUILD_VERSION = 'Merida';
+const BUILD_VERSION = 'Uxmal';
 let DATA = { prendas: [], usos: [], outfits_sugeridos: [], perfil: [], fotos_origen: [] };
 let showTrash = false;
 let soloFavoritos = false;
@@ -667,10 +667,46 @@ async function procesarSiguienteFoto(){
   actualizarProgreso();
   document.getElementById('reviewArea').innerHTML = '<p class="hint">Cargando foto…</p>';
   const resized = await resizeImageFile(uploadQueue[uploadIndex], 1280, 0.85);
-  mostrarRecorteManual(resized, { containerId:'reviewArea', onListo: analizarFotoRecortada, onDescartar: omitirFoto });
+  mostrarRecorteManual(resized, { containerId:'reviewArea', onListo: analizarFotoRecortada, onDescartar: omitirFoto, onListoSinIA: crearPrendaManualDesdeFoto });
 }
 function omitirFoto(){ cleanupCropListeners(); uploadIndex++; procesarSiguienteFoto(); }
 function reintentarFoto(){ if(lastCropped) analizarFotoRecortada(lastCropped); else procesarSiguienteFoto(); }
+// "🖐️ Sin IA" en Subir fotos — en vez de extraerPrendas (detección
+// general), pide categoría/tipo a mano y crea la prenda directo con
+// crearPrendaSinIA (cero llamadas a Gemini) — para cuando la usuaria ya
+// tiene una imagen que le gusta y no quiere gastar créditos en que la
+// IA la vuelva a interpretar.
+function crearPrendaManualDesdeFoto(recortada){
+  const area = document.getElementById('reviewArea');
+  if(!area) return;
+  area.innerHTML = `<p class="hint">Foto lista — dile a la app qué es (sin usar IA):</p>
+    <div class="field"><label>Categoría</label><select id="manualCat">${CATEGORIAS.map(c=>`<option>${escAttr(c)}</option>`).join('')}</select></div>
+    <div class="field"><label>Tipo (opcional)</label><input id="manualTipo" placeholder="ej: reloj, blusa azul"></div>
+    <div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap">
+      <button class="btn secondary" onclick="omitirFoto()">Descartar foto</button>
+      <button class="btn" id="manualGuardarBtn">💾 Guardar sin IA</button>
+    </div>`;
+  document.getElementById('manualGuardarBtn').onclick = ()=> guardarPrendaManualDesdeFoto(recortada);
+}
+async function guardarPrendaManualDesdeFoto(recortada){
+  const categoria = document.getElementById('manualCat').value;
+  const tipo = document.getElementById('manualTipo').value.trim();
+  const btn = document.getElementById('manualGuardarBtn');
+  if(btn){ btn.disabled = true; btn.textContent = 'Guardando…'; }
+  const subOrigen = await apiPost('uploadImage', { imageBase64: recortada.base64, mimeType: recortada.mimeType, fileName:'manual-origen-'+Date.now()+'.jpg' });
+  const origenUrl = subOrigen.ok ? subOrigen.url : '';
+  if(origenUrl) await registrarFotoOrigenSiFalta(origenUrl);
+  const row = await crearPrendaSinIA(categoria, tipo, recortada.dataUrl, origenUrl);
+  await apiPost('saveRow', { table:'PRENDAS', row });
+  DATA.prendas.push(row);
+  const r = await apiPost('registrarUso', { prendaIds:[row.ID], fotoUrl: origenUrl });
+  if(r.ok){ row.VecesUsado = 1; DATA.usos.push(r.uso); }
+  localStorage.setItem('ropa_data_cache', JSON.stringify(DATA));
+  prendasDeEsteLote.push(row.ID);
+  showToast(row.FotoGeneradaURL ? '✓ Guardada — usa 🧽 Borrador para quitarle el fondo' : '✓ Guardada (intenta ajustarla desde Editar prenda)');
+  uploadIndex++;
+  procesarSiguienteFoto();
+}
 // Al terminar el lote: todas las prendas creadas/confirmadas quedan a un
 // toque de distancia para ajustar/recortar/eliminar, sin ir a Catálogo.
 function mostrarResumenLote(){
@@ -696,8 +732,8 @@ function mostrarResumenLote(){
 let cropState = null;
 let lastCropped = null;
 function clamp(v,min,max){ return Math.min(max, Math.max(min, v)); }
-function mostrarRecorteManual(resized, { containerId, onListo, onDescartar }){
-  cropState = { resized, containerId, onListo, onDescartar, rect: { x:0.08, y:0.08, w:0.84, h:0.84 }, mode:null, startPointer:null, startRect:null };
+function mostrarRecorteManual(resized, { containerId, onListo, onDescartar, onListoSinIA }){
+  cropState = { resized, containerId, onListo, onDescartar, onListoSinIA, rect: { x:0.08, y:0.08, w:0.84, h:0.84 }, mode:null, startPointer:null, startRect:null };
   document.getElementById(containerId).innerHTML = `
     <p class="hint">Recorta la foto para que la IA solo analice lo que dejes dentro del cuadro.</p>
     <div class="crop-wrap" id="cropWrap">
@@ -709,6 +745,10 @@ function mostrarRecorteManual(resized, { containerId, onListo, onDescartar }){
         <div class="crop-handle" data-corner="se"></div>
       </div>
     </div>
+    ${onListoSinIA ? `<label class="hint" style="display:flex;gap:8px;align-items:center;margin-top:10px;cursor:pointer">
+      <input type="checkbox" id="cropSinIA" style="width:auto">
+      🖐️ Sin IA — yo elijo la categoría, tú le quitas el fondo después
+    </label>` : ''}
     <div style="display:flex;gap:8px;margin-top:14px;flex-wrap:wrap">
       <button class="btn secondary" onclick="cropState.onDescartar()">Descartar foto</button>
       <button class="btn" onclick="confirmarRecorte()">Recortar y analizar</button>
@@ -757,12 +797,14 @@ function cleanupCropListeners(){
   window.removeEventListener('pointerup', onCropPointerUp);
 }
 function usarFotoCompleta(){
-  const onListo = cropState.onListo;
+  const { onListo, onListoSinIA, resized } = cropState;
+  const sinIA = onListoSinIA && document.getElementById('cropSinIA') && document.getElementById('cropSinIA').checked;
   cleanupCropListeners();
-  onListo(cropState.resized);
+  (sinIA ? onListoSinIA : onListo)(resized);
 }
 function confirmarRecorte(){
-  const { resized, rect, onListo } = cropState;
+  const { resized, rect, onListo, onListoSinIA } = cropState;
+  const sinIA = onListoSinIA && document.getElementById('cropSinIA') && document.getElementById('cropSinIA').checked;
   cleanupCropListeners();
   const sx = Math.round(rect.x * resized.width);
   const sy = Math.round(rect.y * resized.height);
@@ -772,7 +814,8 @@ function confirmarRecorte(){
   canvas.width = sw; canvas.height = sh;
   canvas.getContext('2d').drawImage(resized.canvas, sx, sy, sw, sh, 0, 0, sw, sh);
   const dataUrl = canvas.toDataURL('image/jpeg', 0.85);
-  onListo({ dataUrl, width: sw, height: sh, base64: dataUrl.split(',')[1], mimeType:'image/jpeg', canvas });
+  const recortada = { dataUrl, width: sw, height: sh, base64: dataUrl.split(',')[1], mimeType:'image/jpeg', canvas };
+  (sinIA ? onListoSinIA : onListo)(recortada);
 }
 const NOMBRE_MODELO = { gemini:'Gemini', claude:'Claude' };
 // Un solo mensaje reusado en toda la app para decir con qué IA se
@@ -1509,6 +1552,29 @@ async function crearFilaPrenda(it, origenUrl){
     ID: uid(), Categoria: it.categoria||'Ropa superior', Tipo: it.tipo||'', Color: it.color||'',
     ColorSecundario: it.colorSecundario||'', Estampado: it.estampado||'', Marca:'', Temporada:'',
     Formalidad:'', FotoURL: fotoGeneradaUrl||fotoRealUrl||origenUrl||'', FotoGeneradaURL: fotoGeneradaUrl, BBoxJSON: bboxJson, ClaveColor: claveColor, FotoRealURL: fotoRealUrl, FotoOrigenURL: origenUrl||'', FotoManiquiURL:'', FechaAlta: new Date().toISOString(),
+    UltimoUso:'', VecesUsado:0, Favorito:false, Notas:'', Papelera:false
+  };
+}
+// Igual que crearFilaPrenda pero SIN ninguna llamada a Gemini — solo
+// encaja la foto en el lienzo canónico (bboxDeCapaUrl) y la posiciona
+// por categoría/tipo (reposicionarCapa), igual que "📤 Subir foto de
+// tienda" en Editar prenda. Para cuando la usuaria ya tiene una imagen
+// que le gusta (generada por su cuenta con Gemini, de internet, etc.) y
+// no quiere que la app la vuelva a interpretar/regenerar — queda opaca
+// (con su fondo real), lista para que ella misma le quite el fondo con
+// "🧽 Borrador".
+async function crearPrendaSinIA(categoria, tipo, cropPreviewDataUrl, origenUrl){
+  const medido = await bboxDeCapaUrl(cropPreviewDataUrl);
+  let fotoGeneradaUrl = '', bboxJson = '';
+  if(medido){
+    const reposicionada = await reposicionarCapa(medido.dataUrl, medido.bbox, categoria, tipo);
+    const final = reposicionada || { dataUrl: medido.dataUrl, base64: medido.dataUrl.split(',')[1], bboxPct: medido.bbox };
+    const subida = await apiPost('uploadImage', { imageBase64: final.base64, mimeType:'image/png', fileName:'manual-capa-'+Date.now()+'.png' });
+    if(subida.ok){ fotoGeneradaUrl = subida.url; bboxJson = JSON.stringify(final.bboxPct); }
+  }
+  return {
+    ID: uid(), Categoria: categoria||'Ropa superior', Tipo: tipo||'', Color:'', ColorSecundario:'', Estampado:'', Marca:'', Temporada:'',
+    Formalidad:'', FotoURL: fotoGeneradaUrl||origenUrl||'', FotoGeneradaURL: fotoGeneradaUrl, BBoxJSON: bboxJson, ClaveColor:'', FotoRealURL: origenUrl||'', FotoOrigenURL: origenUrl||'', FotoManiquiURL:'', FechaAlta: new Date().toISOString(),
     UltimoUso:'', VecesUsado:0, Favorito:false, Notas:'', Papelera:false
   };
 }
@@ -3475,13 +3541,54 @@ async function guardarFechaUso(usoId, valorFecha){
 // con lo que ya tiene ese día. A las que se agregan de nuevo se les suma
 // uso; a las que se quitan no se les resta nada (recalcular el conteo
 // exacto implicaría revisar todos los usos — no vale la pena por esto).
+// Editor de prendas de un día ya registrado — versión chica del
+// Vestidor real, para poder arreglar el ORDEN de las capas (▲▼) además
+// de agregar/quitar, no solo un picker plano. Reusa TAL CUAL las
+// funciones del Vestidor (renderVestidorPreview, renderCapasLista,
+// moverCapaOutfit, cambiarPrendaCarrusel, abrirAgregarCapa) — todas
+// leen/escriben el `outfitBoard` global y pintan en
+// #vestidorPreview/#capasListaOutfit, así que mientras este modal está
+// abierto (exclusivo, no se puede tocar el Vestidor real al mismo
+// tiempo) se le presta ese mismo estado global, y se restaura al cerrar
+// para no dejar el Vestidor real mezclado con lo que se edita aquí.
+let outfitBoardGuardado = null;
+let usoEnEdicion = null;
 function editarPrendasDeUso(usoId){
   const u = DATA.usos.find(x=>x.ID===usoId); if(!u) return;
-  let idsViejos = []; try{ idsViejos = JSON.parse(u.PrendaIDsJSON||'[]'); }catch(e){}
-  abrirArmarOutfitManual(async (nuevosIds)=>{
+  let ids = []; try{ ids = JSON.parse(u.PrendaIDsJSON||'[]'); }catch(e){}
+  outfitBoardGuardado = outfitBoard;
+  usoEnEdicion = u;
+  outfitBoard = { capas: ids.filter(id=>findPrenda(id)) };
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay';
+  overlay.id = 'editarUsoOverlay';
+  overlay.innerHTML = `<div class="modal">
+    <h3>Editar prendas — ${formatoFechaUso(u.Fecha)}</h3>
+    <p class="hint">Igual que el Vestidor: ▲▼ para el orden, ‹› para cambiar de prenda.</p>
+    <div class="maniqui-doll-wrap" id="vestidorPreview"><p class="hint" style="padding:60px 0;text-align:center">Cargando maniquí…</p></div>
+    <div id="capasListaOutfit" style="margin-top:10px"></div>
+    <button class="btn secondary" style="margin-top:8px" onclick="abrirAgregarCapa()">➕ Agregar prenda</button>
+    <div class="actions">
+      <button class="btn ghost" id="editarUsoCancelar">Cancelar</button>
+      <button class="btn" id="editarUsoGuardar">💾 Guardar</button>
+    </div>
+  </div>`;
+  document.body.appendChild(overlay);
+  overlay.addEventListener('click', e=>{ if(e.target===overlay) cerrarEditarUso(false); });
+  overlay.querySelector('#editarUsoCancelar').onclick = ()=> cerrarEditarUso(false);
+  overlay.querySelector('#editarUsoGuardar').onclick = ()=> cerrarEditarUso(true);
+  renderVestidorPreview();
+  renderCapasLista();
+}
+async function cerrarEditarUso(guardar){
+  const overlay = document.getElementById('editarUsoOverlay');
+  if(guardar && usoEnEdicion){
+    const u = usoEnEdicion;
+    let idsViejos = []; try{ idsViejos = JSON.parse(u.PrendaIDsJSON||'[]'); }catch(e){}
+    const nuevosIds = outfitBoard.capas.slice();
     u.PrendaIDsJSON = JSON.stringify(nuevosIds);
-    const agregados = nuevosIds.filter(id=>!idsViejos.includes(id));
     await apiPost('saveRow', { table:'USOS', row:u });
+    const agregados = nuevosIds.filter(id=>!idsViejos.includes(id));
     for(const id of agregados){
       const p = findPrenda(id); if(!p) continue;
       p.VecesUsado = (Number(p.VecesUsado)||0)+1;
@@ -3489,9 +3596,13 @@ function editarPrendasDeUso(usoId){
       await apiPost('saveRow', { table:'PRENDAS', row:p });
     }
     localStorage.setItem('ropa_data_cache', JSON.stringify(DATA));
-    renderCalendario();
     showToast('Prendas actualizadas');
-  }, idsViejos);
+    renderCalendario();
+  }
+  if(overlay) overlay.remove();
+  outfitBoard = outfitBoardGuardado;
+  outfitBoardGuardado = null;
+  usoEnEdicion = null;
 }
 // Planificar un día futuro: elegir fecha + una nota de "qué hay ese día"
 // (cena, defensa de tesis, etc.) y decidir el outfit por tres vías — IA,
@@ -3977,13 +4088,12 @@ async function guardarEstiloCabelloDeFoto(recortada){
   showToast('Creando estilo de cabello…');
   const subOrigen = await apiPost('uploadImage', { imageBase64: recortada.base64, mimeType: recortada.mimeType, fileName:'cabello-origen-'+Date.now()+'.jpg' });
   const origenUrl = subOrigen.ok ? subOrigen.url : '';
-  const it = { categoria:'Cabello', tipo:'Cabello (foto)', color:'', colorSecundario:'', estampado:'', caja:true, cropPreview: recortada.dataUrl };
-  const row = await crearFilaPrenda(it, origenUrl);
+  const row = await crearPrendaSinIA('Cabello', 'Cabello (foto)', recortada.dataUrl, origenUrl);
   await apiPost('saveRow', { table:'PRENDAS', row });
   DATA.prendas.push(row);
   localStorage.setItem('ropa_data_cache', JSON.stringify(DATA));
   await elegirPeinadoManiqui(row.ID);
-  showToast('✓ Estilo de cabello agregado');
+  showToast('✓ Estilo de cabello agregado — usa 🧽 Borrador si necesita quitarle el fondo');
 }
 // ------------------------------------------------------------
 //  Moldes del maniquí (Perfil)
