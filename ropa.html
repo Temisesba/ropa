@@ -121,8 +121,6 @@ nav.tabbar button .ic{font-size:19px}
 .maniqui-arrow{position:absolute;transform:translateY(-50%);width:30px;height:30px;border-radius:50%;background:var(--bg-card);border:1px solid var(--border);font-size:16px;z-index:6;box-shadow:var(--shadow);opacity:.92}
 .maniqui-arrow.left{left:4px}
 .maniqui-arrow.right{right:4px}
-.card-swipe{display:flex;overflow-x:auto;scroll-snap-type:x mandatory;-webkit-overflow-scrolling:touch;border-radius:var(--radius) var(--radius) 0 0}
-.card-swipe>*{flex:0 0 100%;scroll-snap-align:start}
 .capa-row{display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid var(--border)}
 .capa-row:last-child{border-bottom:none}
 .capa-row-info{flex:1;font-size:13px}
@@ -353,7 +351,7 @@ let SHEET_URL = '';
 // Nombre-landmark de esta versión — cámbialo en cada cambio que se
 // despliegue, así se puede saber a simple vista (en Perfil) si el
 // celular ya está viendo lo último o una copia vieja en caché.
-const BUILD_VERSION = 'Cozumel';
+const BUILD_VERSION = 'Merida';
 let DATA = { prendas: [], usos: [], outfits_sugeridos: [], perfil: [], fotos_origen: [] };
 let showTrash = false;
 let soloFavoritos = false;
@@ -1394,19 +1392,21 @@ function reposicionarCapaConRegla(dataUrl, bboxPct, regla){
 // Ajuste manual ("✋ Ajustar en maniquí", ver Editar prenda): parte de la
 // capa YA canónica (720x1280, ya sea la puesta automáticamente por
 // reposicionarCapa o una versión ajustada antes) y aplica un desplazamiento
-// (dx,dy en % del lienzo) + escala adicional, centrada en el lienzo —
-// produce, igual que reposicionarCapa, un nuevo PNG 720x1280 final.
+// (dx,dy en % del lienzo) + escala adicional — ancho y alto por
+// separado (sx,sy), no tiene que ser proporcional — centrada en el
+// lienzo. Produce, igual que reposicionarCapa, un nuevo PNG 720x1280
+// final.
 function aplicarAjusteManual(dataUrl, ajuste){
   return new Promise(resolve=>{
     const img = new Image();
     img.onload = ()=>{
       const W = MANIQUI_CANVAS.w, H = MANIQUI_CANVAS.h;
-      const s = ajuste.scale||1;
+      const sx = ajuste.sx||1, sy = ajuste.sy||1;
       const dxPx = (ajuste.dx||0)/100*W, dyPx = (ajuste.dy||0)/100*H;
       const canvas = document.createElement('canvas');
       canvas.width = W; canvas.height = H;
       const ctx = canvas.getContext('2d');
-      ctx.setTransform(s,0,0,s, W/2*(1-s)+dxPx, H/2*(1-s)+dyPx);
+      ctx.setTransform(sx,0,0,sy, W/2*(1-sx)+dxPx, H/2*(1-sy)+dyPx);
       ctx.drawImage(img, 0, 0);
       ctx.setTransform(1,0,0,1,0,0);
       const bboxNuevo = escanearBboxAlfa(ctx, W, H);
@@ -1977,17 +1977,30 @@ function abrirEditarPrenda(id){
   actualizarEstadoMarca(p);
   document.getElementById('edFileTienda').onchange = async (e)=>{
     const files = e.target.files; if(!files.length) return;
-    showToast('Subiendo foto de tienda…');
+    showToast('Preparando tu foto…');
     const resized = await resizeImageFile(files[0], 1280, 0.9);
-    const subida = await apiPost('uploadImage', { imageBase64: resized.base64, mimeType: resized.mimeType, fileName:'tienda-'+Date.now()+'.jpg' });
+    // Se encaja en el mismo lienzo canónico que usan las capas generadas
+    // por IA (bboxDeCapaUrl+reposicionarCapa, ya usados en otras partes
+    // para re-alinear capas existentes) — sin esto, "✋ Ajustar en
+    // maniquí" y "🧽 Borrador" después calculan mal el tamaño/posición
+    // porque asumen ese lienzo. No se le quita el fondo aquí (es una
+    // foto real, no una generación con color clave) — llega opaca a
+    // propósito, lista para que ella misma le quite el fondo con
+    // "🧽 Borrador" (varita o trazo libre).
+    const medido = await bboxDeCapaUrl(resized.dataUrl);
+    if(!medido){ showToast('No se pudo procesar la foto'); return; }
+    const reposicionada = await reposicionarCapa(medido.dataUrl, medido.bbox, p.Categoria, p.Tipo);
+    const final = reposicionada || { dataUrl: medido.dataUrl, base64: medido.dataUrl.split(',')[1], bboxPct: medido.bbox };
+    const subida = await apiPost('uploadImage', { imageBase64: final.base64, mimeType:'image/png', fileName:'tienda-'+Date.now()+'.png' });
     if(!subida.ok){ showToast('No se pudo subir: '+(subida.error||'sin conexión')); return; }
     p.FotoGeneradaURL = subida.url;
     p.FotoURL = subida.url;
+    p.BBoxJSON = JSON.stringify(final.bboxPct);
     await apiPost('saveRow', { table:'PRENDAS', row:p });
     localStorage.setItem('ropa_data_cache', JSON.stringify(DATA));
     renderCatalogo();
     refrescarFotoModal(p);
-    showToast('Foto de tienda guardada');
+    showToast('Foto guardada — usa 🧽 Borrador para quitarle el fondo a mano');
   };
   overlay.querySelector('#edGuardar').onclick = async ()=>{
     p.Categoria = overlay.querySelector('#edCat').value;
@@ -2581,22 +2594,24 @@ let ajusteManiqui = null;
 async function abrirAjustarManiqui(p){
   if(!p.FotoGeneradaURL){ showToast('Esta prenda todavía no tiene una capa para ajustar'); return; }
   const genero = localStorage.getItem('ropa_maniqui_genero')||'mujer';
-  ajusteManiqui = { p, dx:0, dy:0, scale:1 };
+  ajusteManiqui = { p, dx:0, dy:0, sx:1, sy:1 };
   const moldeClaveAjuste = claveMoldeParaPrenda(p.Categoria, p.Tipo);
   const overlay = document.createElement('div');
   overlay.className = 'modal-overlay';
   overlay.id = 'ajustarManiquiOverlay';
   overlay.innerHTML = `<div class="modal">
     <h3>Ajustar en el maniquí</h3>
-    <p class="hint">Arrastra la prenda para moverla; usa los botones para agrandarla o achicarla.</p>
+    <p class="hint">Arrastra la prenda para moverla; usa los deslizadores para estirarla — ancho y alto son independientes, no hace falta que sea proporcional.</p>
     <div class="maniqui-doll-wrap" id="ajustarWrap" style="max-width:240px"><p class="hint" style="padding:60px 0;text-align:center">Cargando…</p></div>
     <div class="chips" style="justify-content:center;margin-top:10px">
       <button class="chip" onclick="ajustarManiquiEscala(-0.05)">➖ Más chica</button>
       <button class="chip" onclick="ajustarManiquiEscala(0.05)">➕ Más grande</button>
       <button class="chip" onclick="ajustarManiquiReset()">↺ Reiniciar</button>
     </div>
-    <input type="range" id="ajustarEscalaSlider" min="30" max="300" step="1" value="100" style="width:100%;margin-top:8px" oninput="ajustarManiquiEscalaSlider(this.value)">
-    <p class="hint" id="ajustarEscalaTxt" style="text-align:center">Tamaño: 100%</p>
+    <p class="hint" id="ajustarAnchoTxt" style="text-align:center;margin-top:8px">↔️ Ancho: 100%</p>
+    <input type="range" id="ajustarAnchoSlider" min="30" max="300" step="1" value="100" style="width:100%" oninput="ajustarManiquiAnchoSlider(this.value)">
+    <p class="hint" id="ajustarAltoTxt" style="text-align:center;margin-top:8px">↕️ Alto: 100%</p>
+    <input type="range" id="ajustarAltoSlider" min="30" max="300" step="1" value="100" style="width:100%" oninput="ajustarManiquiAltoSlider(this.value)">
     ${moldeClaveAjuste ? `<label class="hint" style="display:flex;gap:8px;align-items:flex-start;margin-top:12px;background:var(--accent-soft);padding:10px;border-radius:10px;cursor:pointer">
       <input type="checkbox" id="ajustarGuardarMolde" checked style="width:auto;margin-top:2px">
       <span>Guardar esto como el <b>molde de "${escAttr(moldeBase(moldeClaveAjuste).nombre)}"</b> — todas las prendas nuevas de este tipo van a caer justo aquí, sin volver a ajustarlas.</span>
@@ -2636,41 +2651,55 @@ async function abrirAjustarManiqui(p){
 function aplicarTransformAjuste(){
   const img = document.getElementById('ajustarImg');
   if(!img || !ajusteManiqui) return;
-  img.style.transform = `translate(${ajusteManiqui.dx}%, ${ajusteManiqui.dy}%) scale(${ajusteManiqui.scale})`;
-  const slider = document.getElementById('ajustarEscalaSlider');
-  const txt = document.getElementById('ajustarEscalaTxt');
-  const pct = Math.round(ajusteManiqui.scale*100);
-  if(slider) slider.value = pct;
-  if(txt) txt.textContent = 'Tamaño: '+pct+'%';
+  img.style.transform = `translate(${ajusteManiqui.dx}%, ${ajusteManiqui.dy}%) scale(${ajusteManiqui.sx}, ${ajusteManiqui.sy})`;
+  const anchoSlider = document.getElementById('ajustarAnchoSlider');
+  const anchoTxt = document.getElementById('ajustarAnchoTxt');
+  const altoSlider = document.getElementById('ajustarAltoSlider');
+  const altoTxt = document.getElementById('ajustarAltoTxt');
+  const pctAncho = Math.round(ajusteManiqui.sx*100), pctAlto = Math.round(ajusteManiqui.sy*100);
+  if(anchoSlider) anchoSlider.value = pctAncho;
+  if(anchoTxt) anchoTxt.textContent = '↔️ Ancho: '+pctAncho+'%';
+  if(altoSlider) altoSlider.value = pctAlto;
+  if(altoTxt) altoTxt.textContent = '↕️ Alto: '+pctAlto+'%';
 }
+// ➖/➕ mueven ancho y alto JUNTOS (atajo proporcional, sigue siendo el
+// caso más común); los deslizadores de abajo permiten estirar cada uno
+// por separado — pedido explícito: "jalar poquito por aquí, poquito por
+// allá", que no sea proporcional.
 function ajustarManiquiEscala(delta){
   if(!ajusteManiqui) return;
-  ajusteManiqui.scale = Math.max(0.3, Math.min(3, ajusteManiqui.scale+delta));
+  ajusteManiqui.sx = Math.max(0.3, Math.min(3, ajusteManiqui.sx+delta));
+  ajusteManiqui.sy = Math.max(0.3, Math.min(3, ajusteManiqui.sy+delta));
   aplicarTransformAjuste();
 }
-// El deslizador permite llegar a un punto intermedio exacto — los botones
-// ➖/➕ saltan de 5 en 5% y a veces ese paso se pasa de largo de donde se
-// quería quedar (reportado: "se va muy allá o muy acá").
-function ajustarManiquiEscalaSlider(valor){
+// Los deslizadores permiten llegar a un punto intermedio exacto — los
+// botones ➖/➕ saltan de 5 en 5% y a veces ese paso se pasa de largo de
+// donde se quería quedar (reportado: "se va muy allá o muy acá").
+function ajustarManiquiAnchoSlider(valor){
   if(!ajusteManiqui) return;
-  ajusteManiqui.scale = Math.max(0.3, Math.min(3, Number(valor)/100));
+  ajusteManiqui.sx = Math.max(0.3, Math.min(3, Number(valor)/100));
+  aplicarTransformAjuste();
+}
+function ajustarManiquiAltoSlider(valor){
+  if(!ajusteManiqui) return;
+  ajusteManiqui.sy = Math.max(0.3, Math.min(3, Number(valor)/100));
   aplicarTransformAjuste();
 }
 function ajustarManiquiReset(){
   if(!ajusteManiqui) return;
-  ajusteManiqui.dx=0; ajusteManiqui.dy=0; ajusteManiqui.scale=1;
+  ajusteManiqui.dx=0; ajusteManiqui.dy=0; ajusteManiqui.sx=1; ajusteManiqui.sy=1;
   aplicarTransformAjuste();
 }
 async function guardarAjusteManiqui(){
   if(!ajusteManiqui) return;
-  const { p, dx, dy, scale } = ajusteManiqui;
+  const { p, dx, dy, sx, sy } = ajusteManiqui;
   const btn = document.getElementById('ajustarGuardar');
   if(btn){ btn.disabled=true; btn.textContent='Guardando…'; }
   const fileId = fileIdDeUrlDrive(p.FotoGeneradaURL);
   if(!fileId){ showToast('No se pudo identificar la capa actual'); if(btn){btn.disabled=false;btn.textContent='💾 Guardar ajuste';} return; }
   const r = await apiPost('descargarImagenDrive', { fileId });
   if(!r.ok){ showToast('No se pudo cargar la capa: '+(r.error||'sin conexión')); if(btn){btn.disabled=false;btn.textContent='💾 Guardar ajuste';} return; }
-  const resultado = await aplicarAjusteManual('data:'+r.mimeType+';base64,'+r.base64, { dx, dy, scale });
+  const resultado = await aplicarAjusteManual('data:'+r.mimeType+';base64,'+r.base64, { dx, dy, sx, sy });
   if(!resultado){ showToast('No se pudo aplicar el ajuste'); if(btn){btn.disabled=false;btn.textContent='💾 Guardar ajuste';} return; }
   const subida = await apiPost('uploadImage', { imageBase64: resultado.base64, mimeType:'image/png', fileName:'capa-ajustada-'+Date.now()+'.png' });
   if(!subida.ok){ showToast('No se pudo guardar la imagen ajustada'); if(btn){btn.disabled=false;btn.textContent='💾 Guardar ajuste';} return; }
@@ -3357,27 +3386,112 @@ async function renderCalendario(){
     let ids = []; try{ ids = JSON.parse(u.PrendaIDsJSON||'[]'); }catch(e){}
     const prendas = ids.map(id=>findPrenda(id)).filter(Boolean);
     const capasVestidas = prendas.map(p=>p.FotoGeneradaURL?`<img class="maniqui-doll-capa-full" src="${p.FotoGeneradaURL}">`:'').join('');
-    const hayManiqui = maniquiInfo.cuerpo && capasVestidas;
-    const fotoDia = u.FotoURL ? `<img src="${u.FotoURL}" onclick="verFotoGrande('${u.FotoURL}')" style="width:100%;height:100%;object-fit:cover;cursor:zoom-in">` : '';
-    const maniquiDia = hayManiqui ? `<div class="maniqui-doll-wrap" style="height:180px;max-width:none;margin:0">${maniquiInfo.html}${capasVestidas}</div>` : '';
-    let cabecera = '';
-    if(fotoDia && maniquiDia){
-      cabecera = `<div class="card-swipe" style="height:180px">${fotoDia}${maniquiDia}</div><p class="hint" style="text-align:center;margin:4px 0 0">◂ desliza para ver el maniquí</p>`;
-    } else if(fotoDia){
-      cabecera = `<div style="height:180px;border-radius:var(--radius) var(--radius) 0 0;overflow:hidden">${fotoDia}</div>`;
-    } else if(maniquiDia){
-      cabecera = maniquiDia;
+    const hayManiqui = !!(maniquiInfo.cuerpo && capasVestidas);
+    const hayFoto = !!u.FotoURL;
+    let miniaturas = '';
+    if(hayFoto && hayManiqui){
+      miniaturas = `<div style="display:flex;gap:8px;padding:10px 10px 0">
+        <img src="${u.FotoURL}" onclick="abrirGaleriaUso('${u.ID}',0)" style="width:84px;height:120px;object-fit:cover;border-radius:var(--radius);cursor:zoom-in">
+        <div class="maniqui-doll-wrap" style="width:84px;height:120px;max-width:none;margin:0;cursor:zoom-in" onclick="abrirGaleriaUso('${u.ID}',1)">${maniquiInfo.html}${capasVestidas}</div>
+      </div>`;
+    } else if(hayFoto){
+      miniaturas = `<img src="${u.FotoURL}" onclick="abrirGaleriaUso('${u.ID}',0)" style="width:100%;height:180px;object-fit:cover;border-radius:var(--radius) var(--radius) 0 0;cursor:zoom-in">`;
+    } else if(hayManiqui){
+      miniaturas = `<div class="maniqui-doll-wrap" style="height:180px;max-width:none;margin:0;cursor:zoom-in" onclick="abrirGaleriaUso('${u.ID}',0)">${maniquiInfo.html}${capasVestidas}</div>`;
     }
+    const fechaVal = u.Fecha && !isNaN(new Date(u.Fecha).getTime()) ? new Date(u.Fecha).toISOString().slice(0,10) : '';
     const meta = [u.Evento, u.ClimaTexto].filter(Boolean).join(' · ');
     return `<div class="card" style="margin-bottom:12px">
-      ${cabecera}
+      ${miniaturas}
       <div class="body">
-        <div class="tipo">${formatoFechaUso(u.Fecha)}</div>
+        <div class="field" style="margin:0"><label class="hint">Fecha</label><input type="date" value="${fechaVal}" onchange="guardarFechaUso('${u.ID}', this.value)"></div>
         ${meta?`<div class="meta">${escAttr(meta)}</div>`:''}
         <div class="pick-list" style="margin-top:8px;flex-wrap:wrap">${prendas.length?prendas.map(p=>`<div class="pick-item" onclick="abrirVerPrenda('${p.ID}')">${fotoRecortadaHtml(p,{estilo:'width:56px',clickable:false,iconoTam:20})}<div>${escAttr(p.Tipo||p.Categoria)}</div></div>`).join(''):'<p class="hint">Esas prendas ya no están en tu catálogo.</p>'}</div>
+        <button class="btn ghost" style="font-size:12px;padding:6px 10px;margin-top:6px" onclick="editarPrendasDeUso('${u.ID}')">✏️ Editar prendas</button>
       </div>
     </div>`;
   }).join('');
+}
+// Galería genérica de 2 (o más) "slides" — no solo URLs de imagen: el
+// maniquí compuesto son varias capas encimadas, no un solo archivo, así
+// que cada slide es HTML ya armado. Se guarda en una variable de módulo
+// en vez de serializar HTML dentro de atributos onclick (evita líos de
+// escapado con comillas/URLs).
+let galeriaSlides = [];
+function abrirGaleria(slides, indice){
+  galeriaSlides = slides||[];
+  renderGaleria(indice||0);
+}
+function renderGaleria(indice){
+  if(!galeriaSlides.length) return;
+  indice = ((indice%galeriaSlides.length)+galeriaSlides.length)%galeriaSlides.length;
+  let overlay = document.getElementById('galeriaOverlay');
+  if(!overlay){
+    overlay = document.createElement('div');
+    overlay.id = 'galeriaOverlay';
+    overlay.className = 'modal-overlay';
+    overlay.addEventListener('click', e=>{ if(e.target===overlay) overlay.remove(); });
+    document.body.appendChild(overlay);
+  }
+  const flechas = galeriaSlides.length>1 ? `
+    <button class="maniqui-arrow left" style="top:50%" onclick="renderGaleria(${indice-1})">‹</button>
+    <button class="maniqui-arrow right" style="top:50%" onclick="renderGaleria(${indice+1})">›</button>` : '';
+  overlay.innerHTML = `<div style="position:relative;max-width:320px;width:100%">${galeriaSlides[indice]}${flechas}</div>`;
+}
+// Slides de un día de Calendario: la foto real (si existe) primero, el
+// maniquí vestido con esas prendas después (si hay capas) — se arma al
+// tocar la miniatura, no una vez por pantalla.
+async function abrirGaleriaUso(usoId, indiceInicial){
+  const u = DATA.usos.find(x=>x.ID===usoId); if(!u) return;
+  let ids = []; try{ ids = JSON.parse(u.PrendaIDsJSON||'[]'); }catch(e){}
+  const prendas = ids.map(id=>findPrenda(id)).filter(Boolean);
+  const slides = [];
+  if(u.FotoURL) slides.push(`<img src="${u.FotoURL}" style="max-width:100%;max-height:80vh;border-radius:var(--radius);display:block;margin:0 auto">`);
+  const genero = localStorage.getItem('ropa_maniqui_genero')||'mujer';
+  const maniquiInfo = await maniquiConPeinadoHtml(genero);
+  const capasVestidas = prendas.map(p=>p.FotoGeneradaURL?`<img class="maniqui-doll-capa-full" src="${p.FotoGeneradaURL}">`:'').join('');
+  if(maniquiInfo.cuerpo && capasVestidas) slides.push(`<div class="maniqui-doll-wrap" style="max-width:280px;margin:0 auto">${maniquiInfo.html}${capasVestidas}</div>`);
+  abrirGaleria(slides, indiceInicial||0);
+}
+// Corregir la fecha de un día ya registrado — mismo criterio que
+// guardarFechaFotoOrigen: también actualiza UltimoUso de cada prenda de
+// ese uso, para no dejar el catálogo desincronizado con el historial.
+async function guardarFechaUso(usoId, valorFecha){
+  const u = DATA.usos.find(x=>x.ID===usoId); if(!u || !valorFecha) return;
+  const fecha = new Date(valorFecha).toISOString();
+  u.Fecha = fecha;
+  await apiPost('saveRow', { table:'USOS', row:u });
+  let ids = []; try{ ids = JSON.parse(u.PrendaIDsJSON||'[]'); }catch(e){}
+  for(const id of ids){
+    const p = findPrenda(id);
+    if(p){ p.UltimoUso = fecha; await apiPost('saveRow', { table:'PRENDAS', row:p }); }
+  }
+  localStorage.setItem('ropa_data_cache', JSON.stringify(DATA));
+  showToast('Fecha actualizada');
+  renderCalendario();
+}
+// Agregar/quitar prendas de un día ya registrado — reusa el picker de
+// multi-selección que ya existe (abrirArmarOutfitManual), pre-cargado
+// con lo que ya tiene ese día. A las que se agregan de nuevo se les suma
+// uso; a las que se quitan no se les resta nada (recalcular el conteo
+// exacto implicaría revisar todos los usos — no vale la pena por esto).
+function editarPrendasDeUso(usoId){
+  const u = DATA.usos.find(x=>x.ID===usoId); if(!u) return;
+  let idsViejos = []; try{ idsViejos = JSON.parse(u.PrendaIDsJSON||'[]'); }catch(e){}
+  abrirArmarOutfitManual(async (nuevosIds)=>{
+    u.PrendaIDsJSON = JSON.stringify(nuevosIds);
+    const agregados = nuevosIds.filter(id=>!idsViejos.includes(id));
+    await apiPost('saveRow', { table:'USOS', row:u });
+    for(const id of agregados){
+      const p = findPrenda(id); if(!p) continue;
+      p.VecesUsado = (Number(p.VecesUsado)||0)+1;
+      if(u.Fecha) p.UltimoUso = u.Fecha;
+      await apiPost('saveRow', { table:'PRENDAS', row:p });
+    }
+    localStorage.setItem('ropa_data_cache', JSON.stringify(DATA));
+    renderCalendario();
+    showToast('Prendas actualizadas');
+  }, idsViejos);
 }
 // Planificar un día futuro: elegir fecha + una nota de "qué hay ese día"
 // (cena, defensa de tesis, etc.) y decidir el outfit por tres vías — IA,
@@ -3457,12 +3571,16 @@ async function guardarOutfitParaDia(ids, motivoIA, fecha, nota){
 }
 // Picker ligero de multi-selección por categoría, autónomo (no toca
 // outfitBoard) — mismo patrón visual que abrirAgregarCapa pero con su
-// propio estado temporal, para "✋ Armar yo misma" al planificar un día.
+// propio estado temporal, para "✋ Armar yo misma" al planificar un día
+// y también para editar las prendas de un día ya registrado
+// (editarPrendasDeUso) — ahí se le pasa seleccionInicial con lo que ya
+// tenía ese día, para que aparezca pre-marcado y solo haya que tocar lo
+// que cambia.
 let armarManualSeleccion = null;
-function abrirArmarOutfitManual(onListo){
+function abrirArmarOutfitManual(onListo, seleccionInicial){
   const cats = CATEGORIAS.filter(c=>itemsPorCategoria(c).length);
   if(!cats.length){ showToast('Todavía no tienes prendas en el catálogo'); return; }
-  armarManualSeleccion = [];
+  armarManualSeleccion = (seleccionInicial||[]).slice();
   const overlay = document.createElement('div');
   overlay.className = 'modal-overlay';
   overlay.innerHTML = `<div class="modal">
@@ -3788,8 +3906,7 @@ function abrirElegirOrigenCabello(){
   overlay.querySelector('#cabelloCerrar').onclick = ()=> overlay.remove();
   overlay.querySelector('#cabelloFoto').onclick = ()=>{
     overlay.remove();
-    switchTab('subir');
-    document.getElementById('fileInput').click();
+    abrirSubirFotoCabello();
   };
   overlay.querySelector('#cabelloIA').onclick = ()=>{
     overlay.remove();
@@ -3822,6 +3939,46 @@ async function generarCabelloConIA(descripcion){
     Formalidad:'', FotoURL: subida.url, FotoGeneradaURL: subida.url, BBoxJSON: JSON.stringify(final.bboxPct), ClaveColor:'magenta '+claveHex, FotoRealURL:'', FotoOrigenURL:'', FotoManiquiURL:'', FechaAlta: new Date().toISOString(),
     UltimoUso:'', VecesUsado:0, Favorito:false, Notas:'', Papelera:false
   };
+  await apiPost('saveRow', { table:'PRENDAS', row });
+  DATA.prendas.push(row);
+  localStorage.setItem('ropa_data_cache', JSON.stringify(DATA));
+  await elegirPeinadoManiqui(row.ID);
+  showToast('✓ Estilo de cabello agregado');
+}
+// Subir una foto (peluca, o cabello ya recortado) como estilo de
+// cabello — a propósito NO pasa por la pantalla de "Subir fotos" ni por
+// extraerPrendas (la detección general de TODAS las prendas de una
+// foto): aquí toda la foto ES el cabello, no hay nada más que buscar.
+// Reusa mostrarRecorteManual (ya genérico, no depende de esa pantalla)
+// solo para recortar, y crearFilaPrenda directo con la categoría ya
+// fija en 'Cabello' — mismo pipeline (generarCapaPrenda+quitarFondoColor
+// +reposicionarCapa) que cualquier prenda real, sin pantalla de revisión
+// multi-ítem de por medio.
+function abrirSubirFotoCabello(){
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay';
+  overlay.id = 'cabelloFotoOverlay';
+  overlay.innerHTML = `<div class="modal"><h3>Foto de tu estilo de cabello</h3><div id="cabelloFotoArea"><p class="hint">Elige una foto…</p></div></div>`;
+  document.body.appendChild(overlay);
+  overlay.addEventListener('click', e=>{ if(e.target===overlay) overlay.remove(); });
+  const input = document.createElement('input');
+  input.type = 'file'; input.accept = 'image/*';
+  input.onchange = async ()=>{
+    if(!input.files.length){ overlay.remove(); return; }
+    const resized = await resizeImageFile(input.files[0], 1280, 0.85);
+    if(!document.getElementById('cabelloFotoArea')) return; // ya se cerró
+    mostrarRecorteManual(resized, { containerId:'cabelloFotoArea', onListo: guardarEstiloCabelloDeFoto, onDescartar: ()=>{ const o=document.getElementById('cabelloFotoOverlay'); if(o) o.remove(); } });
+  };
+  input.click();
+}
+async function guardarEstiloCabelloDeFoto(recortada){
+  const overlayViejo = document.getElementById('cabelloFotoOverlay');
+  if(overlayViejo) overlayViejo.remove();
+  showToast('Creando estilo de cabello…');
+  const subOrigen = await apiPost('uploadImage', { imageBase64: recortada.base64, mimeType: recortada.mimeType, fileName:'cabello-origen-'+Date.now()+'.jpg' });
+  const origenUrl = subOrigen.ok ? subOrigen.url : '';
+  const it = { categoria:'Cabello', tipo:'Cabello (foto)', color:'', colorSecundario:'', estampado:'', caja:true, cropPreview: recortada.dataUrl };
+  const row = await crearFilaPrenda(it, origenUrl);
   await apiPost('saveRow', { table:'PRENDAS', row });
   DATA.prendas.push(row);
   localStorage.setItem('ropa_data_cache', JSON.stringify(DATA));
