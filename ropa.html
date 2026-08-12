@@ -351,7 +351,7 @@ let SHEET_URL = '';
 // Nombre-landmark de esta versión — cámbialo en cada cambio que se
 // despliegue, así se puede saber a simple vista (en Perfil) si el
 // celular ya está viendo lo último o una copia vieja en caché.
-const BUILD_VERSION = 'Bonampak';
+const BUILD_VERSION = 'Calakmul';
 let DATA = { prendas: [], usos: [], outfits_sugeridos: [], perfil: [], fotos_origen: [] };
 let showTrash = false;
 let soloFavoritos = false;
@@ -3379,7 +3379,10 @@ async function maniquiConPeinadoHtml(genero){
   if(!cuerpo || !cuerpo.url) return { html:'', cuerpo:null };
   const peinadoId = localStorage.getItem('ropa_maniqui_peinado')||'ninguno';
   const prendaCabello = peinadoId!=='ninguno' ? findPrenda(peinadoId) : null;
-  const pelo = prendaCabello && prendaCabello.FotoGeneradaURL ? prendaCabello.FotoGeneradaURL : '';
+  // Si esa prenda se movió a la papelera (eliminada desde cualquier
+  // lugar), se trata como si no hubiera predeterminado en vez de seguir
+  // mostrando algo ya borrado.
+  const pelo = prendaCabello && !esVerdadero(prendaCabello.Papelera) && prendaCabello.FotoGeneradaURL ? prendaCabello.FotoGeneradaURL : '';
   // "maniqui-pelo" además de la clase visual — así se puede distinguir
   // del resto de las capas (prendas reales) cuando se reusa el HTML ya
   // renderizado sin volver a pedirlo (ver los querySelector('.maniqui-pelo')).
@@ -4007,6 +4010,7 @@ function renderEstilosCabelloPerfil(){
       <div class="capa-row-info"><b>${escAttr(p.Tipo||'Cabello')}</b>${activo?' <span class="hint">✓ predeterminado</span>':''}</div>
       ${activo?'':`<button class="btn ghost" style="font-size:12px;padding:6px 10px" onclick="elegirPeinadoManiqui('${p.ID}')">Usar</button>`}
       <button class="btn ghost" style="font-size:12px;padding:6px 10px" onclick="abrirAjustarManiqui(findPrenda('${p.ID}'))">✋ Ajustar</button>
+      <button class="btn ghost" style="font-size:12px;padding:6px 10px" onclick="abrirEditarPrenda('${p.ID}')" title="Editar, Borrador, Regenerar y más">✏️ Editar</button>
       <button class="remove" onclick="eliminarEstiloCabello('${p.ID}')" title="Eliminar">🗑</button>
     </div>`;
   }).join('');
@@ -4030,8 +4034,9 @@ function abrirElegirOrigenCabello(){
   overlay.innerHTML = `<div class="modal">
     <h3>Agregar estilo de cabello</h3>
     <div class="chips" style="flex-direction:column;align-items:stretch">
-      <button class="btn ghost" id="cabelloFoto">📸 Subir foto (peluca, o solo tu cabello recortado)</button>
-      <button class="btn ghost" id="cabelloIA">✨ Generar con IA (sin foto)</button>
+      <button class="btn ghost" id="cabelloFoto">📸 Subir foto (yo la ajusto y le quito el fondo)</button>
+      <button class="btn ghost" id="cabelloFotoIA">🎨 Subir foto y que la IA la genere sobre el maniquí</button>
+      <button class="btn ghost" id="cabelloIA">✨ Generar con IA (sin foto, solo descripción)</button>
     </div>
     <div class="actions"><button class="btn ghost" id="cabelloCerrar">Cancelar</button></div>
   </div>`;
@@ -4040,7 +4045,11 @@ function abrirElegirOrigenCabello(){
   overlay.querySelector('#cabelloCerrar').onclick = ()=> overlay.remove();
   overlay.querySelector('#cabelloFoto').onclick = ()=>{
     overlay.remove();
-    abrirSubirFotoCabello();
+    abrirSubirFotoCabello(false);
+  };
+  overlay.querySelector('#cabelloFotoIA').onclick = ()=>{
+    overlay.remove();
+    abrirSubirFotoCabello(true);
   };
   overlay.querySelector('#cabelloIA').onclick = ()=>{
     overlay.remove();
@@ -4088,11 +4097,11 @@ async function generarCabelloConIA(descripcion){
 // fija en 'Cabello' — mismo pipeline (generarCapaPrenda+quitarFondoColor
 // +reposicionarCapa) que cualquier prenda real, sin pantalla de revisión
 // multi-ítem de por medio.
-function abrirSubirFotoCabello(){
+function abrirSubirFotoCabello(conIA){
   const overlay = document.createElement('div');
   overlay.className = 'modal-overlay';
   overlay.id = 'cabelloFotoOverlay';
-  overlay.innerHTML = `<div class="modal"><h3>Foto de tu estilo de cabello</h3><div id="cabelloFotoArea"><p class="hint">Elige una foto…</p></div></div>`;
+  overlay.innerHTML = `<div class="modal"><h3>${conIA?'Generar cabello con IA a partir de una foto':'Foto de tu estilo de cabello'}</h3>${conIA?'<p class="hint">Funciona mejor si en la foto se ve SOLO el cabello/peluca, sin el resto del cuerpo — si sale mal, la foto igual queda guardada y la puedes ajustar a mano.</p>':''}<div id="cabelloFotoArea"><p class="hint">Elige una foto…</p></div></div>`;
   document.body.appendChild(overlay);
   overlay.addEventListener('click', e=>{ if(e.target===overlay) overlay.remove(); });
   const input = document.createElement('input');
@@ -4101,7 +4110,7 @@ function abrirSubirFotoCabello(){
     if(!input.files.length){ overlay.remove(); return; }
     const resized = await resizeImageFile(input.files[0], 1280, 0.85);
     if(!document.getElementById('cabelloFotoArea')) return; // ya se cerró
-    mostrarRecorteManual(resized, { containerId:'cabelloFotoArea', onListo: guardarEstiloCabelloDeFoto, onDescartar: ()=>{ const o=document.getElementById('cabelloFotoOverlay'); if(o) o.remove(); } });
+    mostrarRecorteManual(resized, { containerId:'cabelloFotoArea', onListo: conIA?guardarEstiloCabelloDeFotoConIA:guardarEstiloCabelloDeFoto, onDescartar: ()=>{ const o=document.getElementById('cabelloFotoOverlay'); if(o) o.remove(); } });
   };
   input.click();
 }
@@ -4117,6 +4126,27 @@ async function guardarEstiloCabelloDeFoto(recortada){
   localStorage.setItem('ropa_data_cache', JSON.stringify(DATA));
   await elegirPeinadoManiqui(row.ID);
   showToast('✓ Estilo de cabello agregado — usa 🧽 Borrador si necesita quitarle el fondo');
+}
+// Camino CON IA a partir de una foto (a diferencia de guardarEstiloCabelloDeFoto,
+// que solo la posiciona) — usa crearFilaPrenda (generarCapaPrenda +
+// quitarFondoColor + reposicionarCapa), igual que cualquier prenda real.
+// Si la IA malinterpreta la foto (ej. una foto de una persona, no solo
+// una peluca aislada) y no logra una capa válida, crearFilaPrenda ya
+// cae de vuelta a guardar la foto real sin capa — no se pierde nada, se
+// puede ajustar a mano con "✏️ Editar" después.
+async function guardarEstiloCabelloDeFotoConIA(recortada){
+  const overlayViejo = document.getElementById('cabelloFotoOverlay');
+  if(overlayViejo) overlayViejo.remove();
+  showToast('Generando con IA…');
+  const subOrigen = await apiPost('uploadImage', { imageBase64: recortada.base64, mimeType: recortada.mimeType, fileName:'cabello-origen-'+Date.now()+'.jpg' });
+  const origenUrl = subOrigen.ok ? subOrigen.url : '';
+  const it = { categoria:'Cabello', tipo:'Cabello (foto)', color:'', colorSecundario:'', estampado:'', caja:true, cropPreview: recortada.dataUrl };
+  const row = await crearFilaPrenda(it, origenUrl);
+  await apiPost('saveRow', { table:'PRENDAS', row });
+  DATA.prendas.push(row);
+  localStorage.setItem('ropa_data_cache', JSON.stringify(DATA));
+  await elegirPeinadoManiqui(row.ID);
+  showToast(row.FotoGeneradaURL ? '✓ Estilo de cabello generado' : '✓ Guardada tu foto — la IA no lo logró bien esta vez, ajústala con ✏️ Editar');
 }
 // ------------------------------------------------------------
 //  Moldes del maniquí (Perfil)
