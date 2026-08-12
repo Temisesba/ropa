@@ -351,7 +351,7 @@ let SHEET_URL = '';
 // Nombre-landmark de esta versión — cámbialo en cada cambio que se
 // despliegue, así se puede saber a simple vista (en Perfil) si el
 // celular ya está viendo lo último o una copia vieja en caché.
-const BUILD_VERSION = 'Calakmul';
+const BUILD_VERSION = 'Ek Balam';
 let DATA = { prendas: [], usos: [], outfits_sugeridos: [], perfil: [], fotos_origen: [] };
 let showTrash = false;
 let soloFavoritos = false;
@@ -1117,6 +1117,7 @@ const MOLDES_BASE = [
   { clave:'blusa',        nombre:'Blusa / camisa',       grupo:'Arriba',      patrones:['blusa','camisa','camisola'],                                                    regla:{ ancho:46, vAlign:'top', anclaY:20.0, xCentro:50 } },
   { clave:'sueter',       nombre:'Suéter / sudadera',    grupo:'Arriba',      patrones:['sueter','sudadera','hoodie','jersey','pullover','cardigan','chaleco'],          regla:{ ancho:48, vAlign:'top', anclaY:19.5, xCentro:50 } },
   { clave:'abrigo',       nombre:'Abrigo / chamarra',    grupo:'Arriba',      patrones:['abrigo','chamarra','chaqueta','saco','blazer','gabardina','impermeable','trench'], regla:{ ancho:54, vAlign:'top', anclaY:19.0, xCentro:50 } },
+  { clave:'pijama',       nombre:'Pijama',               grupo:'Arriba',      patrones:['pijama','piyama','camison'],                                                    regla:{ ancho:48, vAlign:'top', anclaY:19.5, xCentro:50 } },
   // Ropa inferior
   { clave:'falda-larga',  nombre:'Falda larga / midi',   grupo:'Abajo',       patrones:['falda larga','falda maxi','falda midi','maxifalda'],                            regla:{ ancho:44, vAlign:'top', anclaY:41.0, xCentro:50 } },
   { clave:'falda-corta',  nombre:'Falda corta / mini',   grupo:'Abajo',       patrones:['falda corta','minifalda','falda mini'],                                         regla:{ ancho:40, vAlign:'top', anclaY:41.0, xCentro:50 } },
@@ -1129,6 +1130,7 @@ const MOLDES_BASE = [
   { clave:'vestido-corto',nombre:'Vestido corto',        grupo:'Enterizos',   patrones:['vestido corto','vestido mini'],                                                 regla:{ ancho:46, vAlign:'top', anclaY:20.0, xCentro:50 } },
   { clave:'vestido',      nombre:'Vestido (sin largo)',  grupo:'Enterizos',   patrones:['vestido'],                                                                      regla:{ ancho:46, vAlign:'top', anclaY:20.0, xCentro:50 } },
   { clave:'jumpsuit',     nombre:'Jumpsuit / overol',    grupo:'Enterizos',   patrones:['jumpsuit','overol','mameluco','enterizo'],                                         regla:{ ancho:44, vAlign:'top', anclaY:20.0, xCentro:50 } },
+  { clave:'traje-bano',   nombre:'Traje de baño',        grupo:'Enterizos',   patrones:['traje de bano','vestido de bano','banador','bikini','malla de bano'],               regla:{ ancho:34, vAlign:'top', anclaY:20.0, xCentro:50 } },
   // Calzado
   { clave:'botas',        nombre:'Botas / botines',      grupo:'Calzado',     patrones:['bota','botin'],                                                                 regla:{ ancho:27, vAlign:'bottom', anclaY:93.0, xCentro:50 } },
   { clave:'tenis',        nombre:'Tenis / deportivos',   grupo:'Calzado',     patrones:['tenis','sneaker','deportivo'],                                                  regla:{ ancho:30, vAlign:'bottom', anclaY:93.0, xCentro:50 } },
@@ -2845,19 +2847,53 @@ async function confirmarRecorteEdicion(p, recortada){
 //  Qué me puse hoy
 // ============================================================
 let seleccionHoy = new Set();
+// Etiqueta amigable del "grupo" de cada molde (MOLDES_BASE) — mismo
+// campo que ya se usa para organizar Perfil → Moldes del maniquí, aquí
+// nada más se le pone un nombre más claro para mostrarlo en Hoy.
+const GRUPO_ETIQUETA = {
+  'Arriba':'🔝 Superior', 'Abajo':'👖 Inferior', 'Enterizos':'👗 Vestidos y enterizos',
+  'Calzado':'👟 Calzado', 'Accesorios':'💎 Accesorios', 'Cabello':'💇 Cabello', 'Bolsos':'👜 Bolsos'
+};
+const ORDEN_GRUPOS_HOY = ['Arriba','Abajo','Enterizos','Calzado','Accesorios','Cabello','Bolsos'];
+function itemHoyHtml(p, cat){
+  return `<div class="pick-item ${seleccionHoy.has(p.ID)?'selected':''}" onclick="toggleSeleccionHoy('${p.ID}')">
+    ${fotoRecortadaHtml(p,{estilo:'width:76px', clickable:false, iconoTam:26, iconoFallback:CATEGORIA_ICONO[cat]||'🏷️'})}
+    <div>${escAttr(p.Tipo||cat)}</div>
+  </div>`;
+}
+// Agrupado en dos niveles: primero el grupo grande del molde (Superior,
+// Inferior, Calzado, etc. — mismas subclasificaciones que ya existen
+// para posicionar en el maniquí, ver MOLDES_BASE), y dentro el subtipo
+// específico (Playera/camiseta, Blusa/camisa, etc.) — pedido explícito
+// para no tener que buscar entre TODA la ropa superior junta. Lo que no
+// matchea ningún molde (Tipo raro, o una categoría personalizada nueva
+// sin moldes propios) se agrupa aparte, al final, por su Categoría
+// normal — para que nada quede sin mostrarse.
 function renderHoy(){
   const wrap = document.getElementById('hoyPickGroups');
   const activos = DATA.prendas.filter(p=>!esVerdadero(p.Papelera));
-  wrap.innerHTML = CATEGORIAS.map(cat=>{
-    const items = activos.filter(p=>p.Categoria===cat);
-    if(!items.length) return '';
-    return `<div class="pick-group"><h3>${CATEGORIA_ICONO[cat]} ${cat}</h3><div class="pick-list">
-      ${items.map(p=>`<div class="pick-item ${seleccionHoy.has(p.ID)?'selected':''}" onclick="toggleSeleccionHoy('${p.ID}')">
-        ${fotoRecortadaHtml(p,{estilo:'width:76px', clickable:false, iconoTam:26, iconoFallback:CATEGORIA_ICONO[cat]})}
-        <div>${escAttr(p.Tipo||cat)}</div>
-      </div>`).join('')}
-    </div></div>`;
-  }).join('') || '<p class="hint">Todavía no hay prendas en tu catálogo.</p>';
+  const porGrupo = {};
+  const sinMolde = {};
+  activos.forEach(p=>{
+    const clave = claveMoldeParaPrenda(p.Categoria, p.Tipo);
+    if(clave){
+      const m = moldeBase(clave);
+      porGrupo[m.grupo] = porGrupo[m.grupo] || {};
+      (porGrupo[m.grupo][m.nombre] = porGrupo[m.grupo][m.nombre] || []).push(p);
+    } else {
+      (sinMolde[p.Categoria] = sinMolde[p.Categoria] || []).push(p);
+    }
+  });
+  let html = ORDEN_GRUPOS_HOY.filter(g=>porGrupo[g]).map(g=>{
+    const subs = Object.keys(porGrupo[g]);
+    return `<div class="pick-group"><h3>${GRUPO_ETIQUETA[g]||g}</h3>` +
+      subs.map(nombre=>`<p class="hint" style="margin:8px 0 4px">${escAttr(nombre)}</p><div class="pick-list">${porGrupo[g][nombre].map(p=>itemHoyHtml(p,p.Categoria)).join('')}</div>`).join('') +
+      `</div>`;
+  }).join('');
+  html += Object.keys(sinMolde).map(cat=>
+    `<div class="pick-group"><h3>${CATEGORIA_ICONO[cat]||'🏷️'} ${escAttr(cat)}</h3><div class="pick-list">${sinMolde[cat].map(p=>itemHoyHtml(p,cat)).join('')}</div></div>`
+  ).join('');
+  wrap.innerHTML = html || '<p class="hint">Todavía no hay prendas en tu catálogo.</p>';
   renderUsosRecientes();
 }
 function toggleSeleccionHoy(id){ seleccionHoy.has(id) ? seleccionHoy.delete(id) : seleccionHoy.add(id); renderHoy(); }
