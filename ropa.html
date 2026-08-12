@@ -351,7 +351,7 @@ let SHEET_URL = '';
 // Nombre-landmark de esta versión — cámbialo en cada cambio que se
 // despliegue, así se puede saber a simple vista (en Perfil) si el
 // celular ya está viendo lo último o una copia vieja en caché.
-const BUILD_VERSION = 'Palenque';
+const BUILD_VERSION = 'Bonampak';
 let DATA = { prendas: [], usos: [], outfits_sugeridos: [], perfil: [], fotos_origen: [] };
 let showTrash = false;
 let soloFavoritos = false;
@@ -2899,7 +2899,11 @@ function pedirEliminarUso(id){
     await apiPost('deleteRow', { table:'USOS', id });
     DATA.usos = DATA.usos.filter(u=>u.ID!==id);
     localStorage.setItem('ropa_data_cache', JSON.stringify(DATA));
+    // Se llama desde Hoy y desde Calendario — cada render ya se protege
+    // solo (revisa que su contenedor exista), así que no hace falta
+    // saber desde cuál pantalla se llamó.
     renderUsosRecientes();
+    renderCalendario();
     showToast('Eliminado');
   });
 }
@@ -3473,7 +3477,10 @@ async function renderCalendario(){
         <div class="field" style="margin:0"><label class="hint">Fecha</label><input type="date" value="${fechaVal}" onchange="guardarFechaUso('${u.ID}', this.value)"></div>
         ${meta?`<div class="meta">${escAttr(meta)}</div>`:''}
         <div class="pick-list" style="margin-top:8px;flex-wrap:wrap">${prendas.length?prendas.map(p=>`<div class="pick-item" onclick="abrirVerPrenda('${p.ID}')">${fotoRecortadaHtml(p,{estilo:'width:56px',clickable:false,iconoTam:20})}<div>${escAttr(p.Tipo||p.Categoria)}</div></div>`).join(''):'<p class="hint">Esas prendas ya no están en tu catálogo.</p>'}</div>
-        <button class="btn ghost" style="font-size:12px;padding:6px 10px;margin-top:6px" onclick="editarPrendasDeUso('${u.ID}')">✏️ Editar prendas</button>
+        <div style="display:flex;gap:6px;margin-top:6px">
+          <button class="btn ghost" style="font-size:12px;padding:6px 10px" onclick="editarPrendasDeUso('${u.ID}')">✏️ Editar prendas</button>
+          <button class="remove" onclick="pedirEliminarUso('${u.ID}')" title="Eliminar este día">🗑</button>
+        </div>
       </div>
     </div>`;
   }).join('');
