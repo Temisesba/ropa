@@ -296,13 +296,24 @@ nav.tabbar button .ic{font-size:19px}
       </div>
       <button class="btn" onclick="guardarPerfil()">Guardar perfil</button>
 
-      <h3 style="margin-top:26px">Moldes del maniquí</h3>
-      <p class="hint">Cada tipo de prenda tiene un molde: el lugar y el tamaño exactos que ocupa sobre el maniquí. Cada foto nueva se acomoda sola en el molde de su tipo, así que solo tienes que dejarlo bien una vez. Ajusta el que no te cuadre y, si quieres, re-alinea de un jalón las prendas que ya tenías.</p>
-      <div id="moldesArea"></div>
+      <details style="margin-top:26px">
+        <summary><h3 style="display:inline">Moldes del maniquí</h3></summary>
+        <p class="hint">Cada tipo de prenda tiene un molde: el lugar y el tamaño exactos que ocupa sobre el maniquí. Cada foto nueva se acomoda sola en el molde de su tipo, así que solo tienes que dejarlo bien una vez. Ajusta el que no te cuadre y, si quieres, re-alinea de un jalón las prendas que ya tenías.</p>
+        <div id="moldesArea"></div>
+      </details>
 
-      <h3 style="margin-top:26px">Fotos subidas</h3>
-      <p class="hint">Ponles fecha si sabes cuándo son (se ve igual en todas las prendas que salieron de esa foto) o elimínalas de tus prendas.</p>
-      <div id="fotosSubidasArea"></div>
+      <details style="margin-top:10px">
+        <summary><h3 style="display:inline">Categorías de prendas</h3></summary>
+        <p class="hint">Agrega, renombra o quita las categorías (Ropa superior, Calzado, etc.). Si renombras una, todas sus prendas se actualizan solas.</p>
+        <button class="btn secondary" style="margin-top:8px" onclick="abrirFormCategoria()">➕ Agregar categoría</button>
+        <div id="categoriasArea" style="margin-top:10px"></div>
+      </details>
+
+      <details style="margin-top:10px">
+        <summary><h3 style="display:inline">Fotos subidas</h3></summary>
+        <p class="hint">Ponles fecha si sabes cuándo son (se ve igual en todas las prendas que salieron de esa foto) o elimínalas de tus prendas.</p>
+        <div id="fotosSubidasArea"></div>
+      </details>
 
       <h3 style="margin-top:26px">Versión</h3>
       <p class="hint">🗺️ <span id="perfilVersionTexto"></span>
@@ -344,7 +355,7 @@ let SHEET_URL = '';
 // Nombre-landmark de esta versión — cámbialo en cada cambio que se
 // despliegue, así se puede saber a simple vista (en Perfil) si el
 // celular ya está viendo lo último o una copia vieja en caché.
-const BUILD_VERSION = 'Bacalar';
+const BUILD_VERSION = 'Chetumal';
 let DATA = { prendas: [], usos: [], outfits_sugeridos: [], perfil: [], fotos_origen: [] };
 let showTrash = false;
 let soloFavoritos = false;
@@ -356,8 +367,42 @@ let activeCategoria = 'Todas';
 // prenda, en vez de ser un "addon" aparte del maniquí con reglas propias.
 // (El selector de peinado en Perfil sigue existiendo aparte, como opción
 // rápida de cabello por defecto — no se estorban entre sí.)
-const CATEGORIAS = ['Calzado','Ropa superior','Ropa inferior','Vestidos','Abrigos','Accesorios','Cabello','Bolsos','Ropa interior','Deportiva'];
-const CATEGORIA_ICONO = {'Calzado':'👟','Ropa superior':'👕','Ropa inferior':'👖','Vestidos':'👗','Abrigos':'🧥','Accesorios':'🧣','Cabello':'💇','Bolsos':'👜','Ropa interior':'🩲','Deportiva':'🏃'};
+// Las tres constantes de abajo son "let" a propósito — pedido explícito:
+// la usuaria puede agregar/renombrar/quitar categorías desde Perfil (ver
+// renderCategoriasPerfil), y el resultado se guarda en PERFIL.CategoriasJSON.
+// Estos son solo los valores de FÁBRICA — restaurarPreferenciasDesdePerfil
+// los reemplaza si hay algo guardado.
+let CATEGORIAS = ['Calzado','Ropa superior','Ropa inferior','Vestidos','Abrigos','Accesorios','Cabello','Bolsos','Ropa interior','Deportiva'];
+let CATEGORIA_ICONO = {'Calzado':'👟','Ropa superior':'👕','Ropa inferior':'👖','Vestidos':'👗','Abrigos':'🧥','Accesorios':'🧣','Cabello':'💇','Bolsos':'👜','Ropa interior':'🩲','Deportiva':'🏃'};
+// A qué zona del maniquí corresponde cada categoría (ver ZONA_PRESET) —
+// reemplaza el REGLAS_ANCLA fijo de antes por algo que la usuaria puede
+// elegir al crear/editar una categoría ("¿a qué corresponde? arriba,
+// abajo, cuerpo completo…").
+let CATEGORIA_ZONA = {'Calzado':'pies','Ropa superior':'arriba','Ropa inferior':'abajo','Vestidos':'arriba','Abrigos':'arriba','Accesorios':'accesorio','Cabello':'cabeza','Bolsos':'colgante','Ropa interior':'abajo','Deportiva':'arriba'};
+// Espejo en localStorage de las categorías personalizadas — se lee de
+// una vez al cargar el script (antes de que responda el backend) para
+// que los selectores no parpadeen mostrando primero las de fábrica;
+// restaurarPreferenciasDesdePerfil hace lo mismo desde el backend
+// después, por si esta copia local está desactualizada.
+const CATEGORIAS_KEY = 'ropa_categorias_v1';
+(function cargarCategoriasLocal(){
+  try{
+    const guardado = JSON.parse(localStorage.getItem(CATEGORIAS_KEY));
+    if(guardado && guardado.orden && guardado.orden.length){
+      CATEGORIAS = guardado.orden;
+      CATEGORIA_ZONA = guardado.zonas || CATEGORIA_ZONA;
+      CATEGORIA_ICONO = Object.assign({}, CATEGORIA_ICONO, guardado.iconos||{});
+    }
+  }catch(e){}
+})();
+// Guarda al instante en localStorage y manda al backend (mismo patrón
+// que guardarMoldesUsuario) — para que sobreviva cambiar de celular o
+// que se borre el caché.
+function guardarCategoriasPersonalizadas(){
+  const payload = { orden: CATEGORIAS, zonas: CATEGORIA_ZONA, iconos: CATEGORIA_ICONO };
+  try{ localStorage.setItem(CATEGORIAS_KEY, JSON.stringify(payload)); }catch(e){}
+  guardarCampoPerfil('CategoriasJSON', JSON.stringify(payload));
+}
 const FORMALIDADES = ['Casual','Trabajo','Formal','Deportivo','Fiesta'];
 
 // Catálogo, Vestidor ("solo prendas"), Hoy, Olvidados, revisión de
@@ -396,6 +441,17 @@ function showToast(msg){ const t=document.getElementById('toast'); t.textContent
 //  Comunicación con el backend
 // ============================================================
 function needsSetup(){ return !GAS_URL; }
+// Solo se reintenta 'saveRow' — a propósito NO las llamadas de IA
+// (generarCapaPrenda, sugerirOutfit, extraerPrendas, etc.) ni uploadImage:
+// esas cuestan crédito o el que las llama necesita el resultado (una URL)
+// al momento, así que si fallan siguen mostrando el error de siempre, sin
+// reintento silencioso. saveRow es distinto: casi todo el código ya
+// actualiza DATA/localStorage de forma optimista antes o junto con el
+// await, así que lo único que se pierde si falla es que el Sheet remoto
+// se quede desactualizado — justo lo que esta cola arregla.
+const ACCIONES_REINTENTABLES = new Set(['saveRow']);
+const COLA_PENDIENTE_KEY = 'ropa_cola_pendiente';
+let reintentandoCola = false;
 async function apiPost(action, params){
   if(needsSetup()) return { ok:false, error:'sin vincular' };
   const body = Object.assign({ action }, params||{});
@@ -408,8 +464,35 @@ async function apiPost(action, params){
     return data;
   }catch(e){
     setConnBanner(true);
+    if(ACCIONES_REINTENTABLES.has(action) && !reintentandoCola) encolarReintento(action, params);
     return { ok:false, error: e.message||'sin conexión' };
   }
+}
+function encolarReintento(action, params){
+  let cola = [];
+  try{ cola = JSON.parse(localStorage.getItem(COLA_PENDIENTE_KEY))||[]; }catch(e){}
+  cola.push({ action, params });
+  try{ localStorage.setItem(COLA_PENDIENTE_KEY, JSON.stringify(cola)); }catch(e){}
+  showToast('Sin conexión — se guardará solo cuando vuelva el internet');
+}
+// Se dispara al reconectar (window 'online') — reintenta cada guardado
+// pendiente en orden; si alguno sigue fallando, se queda en la cola para
+// el siguiente intento. La bandera "reintentandoCola" evita que apiPost
+// vuelva a encolar duplicados mientras esta función ya está reintentando.
+async function procesarColaPendiente(){
+  let cola = [];
+  try{ cola = JSON.parse(localStorage.getItem(COLA_PENDIENTE_KEY))||[]; }catch(e){}
+  if(!cola.length) return;
+  const restante = [];
+  let ok = 0;
+  reintentandoCola = true;
+  for(const item of cola){
+    const r = await apiPost(item.action, item.params);
+    if(r && r.ok) ok++; else restante.push(item);
+  }
+  reintentandoCola = false;
+  try{ localStorage.setItem(COLA_PENDIENTE_KEY, JSON.stringify(restante)); }catch(e){}
+  if(ok) showToast(`Se guardaron ${ok} cambio(s) pendiente(s)`);
 }
 function setConnBanner(show){ document.getElementById('connBanner').classList.toggle('show', show); }
 
@@ -436,8 +519,9 @@ function boot(){
   if(cached){ try{ DATA = normalizeData(JSON.parse(cached)); }catch(e){} }
   switchTab('subir');
   refreshData();
+  procesarColaPendiente(); // por si quedó algo pendiente de la sesión anterior
   if('serviceWorker' in navigator){ navigator.serviceWorker.register('sw.js').catch(()=>{}); }
-  window.addEventListener('online', refreshData);
+  window.addEventListener('online', ()=>{ refreshData(); procesarColaPendiente(); });
 }
 async function refreshData(){
   const r = await apiPost('getAll', {});
@@ -463,6 +547,17 @@ function restaurarPreferenciasDesdePerfil(){
   if(p.ManiquiGenero) localStorage.setItem('ropa_maniqui_genero', p.ManiquiGenero);
   if(p.ManiquiEstatura) localStorage.setItem('ropa_maniqui_estatura', p.ManiquiEstatura);
   if(p.ManiquiPeinado) localStorage.setItem('ropa_maniqui_peinado', p.ManiquiPeinado);
+  if(p.CategoriasJSON){
+    try{
+      const c = JSON.parse(p.CategoriasJSON);
+      if(c && c.orden && c.orden.length){
+        CATEGORIAS = c.orden;
+        CATEGORIA_ZONA = c.zonas || CATEGORIA_ZONA;
+        CATEGORIA_ICONO = Object.assign({}, CATEGORIA_ICONO, c.iconos||{});
+        localStorage.setItem(CATEGORIAS_KEY, p.CategoriasJSON);
+      }
+    }catch(e){}
+  }
 }
 // Prendas creadas antes de que existiera la tabla FOTOS_ORIGEN nunca
 // escribieron su fila ahí, así que "Fotos subidas" (que lee solo de esa
@@ -526,9 +621,15 @@ let uploadQueue = [];
 let uploadIndex = 0;
 let currentDetections = null; // { dataUrl, width, height, base64, mimeType, canvas, items:[...] }
 
+// Prendas creadas/confirmadas durante ESTE lote (subir varias fotos
+// seguidas) — pedido explícito: al terminar, ver todas de un jalón para
+// ajustar dimensiones/recortar/eliminar sin tener que ir a buscarlas al
+// Catálogo.
+let prendasDeEsteLote = [];
 function onFilesSelected(fileList){
   uploadQueue = Array.from(fileList);
   uploadIndex = 0;
+  prendasDeEsteLote = [];
   if(!uploadQueue.length) return;
   document.getElementById('uploadProgressWrap').classList.remove('hidden');
   procesarSiguienteFoto();
@@ -564,8 +665,7 @@ function resizeImageFile(file, maxDim, quality){
 async function procesarSiguienteFoto(){
   if(uploadIndex >= uploadQueue.length){
     document.getElementById('uploadProgressWrap').classList.add('hidden');
-    document.getElementById('reviewArea').innerHTML = '';
-    showToast('Listo — todas las fotos procesadas');
+    mostrarResumenLote();
     return;
   }
   actualizarProgreso();
@@ -575,6 +675,21 @@ async function procesarSiguienteFoto(){
 }
 function omitirFoto(){ cleanupCropListeners(); uploadIndex++; procesarSiguienteFoto(); }
 function reintentarFoto(){ if(lastCropped) analizarFotoRecortada(lastCropped); else procesarSiguienteFoto(); }
+// Al terminar el lote: todas las prendas creadas/confirmadas quedan a un
+// toque de distancia para ajustar/recortar/eliminar, sin ir a Catálogo.
+function mostrarResumenLote(){
+  const area = document.getElementById('reviewArea');
+  const prendas = prendasDeEsteLote.map(id=>findPrenda(id)).filter(Boolean);
+  if(!prendas.length){ area.innerHTML = ''; showToast('Listo — todas las fotos procesadas'); return; }
+  area.innerHTML = `<p class="hint" style="margin-top:10px">✅ Listo — ${prendas.length} prenda(s) de este lote. Ajusta lo que haga falta:</p>` +
+    prendas.map(p=>`<div class="detect-card" id="resumen-${p.ID}">
+      ${fotoRecortadaHtml(p,{estilo:'width:64px;height:64px;object-fit:cover;border-radius:8px', clickable:false})}
+      <div class="fields" style="flex:1"><div class="hint">${escAttr(p.Tipo||p.Categoria)}</div></div>
+      <button class="btn ghost" style="font-size:12px;padding:6px 10px" onclick="abrirAjustarManiqui(findPrenda('${p.ID}'))">✋ Ajustar</button>
+      <button class="btn ghost" style="font-size:12px;padding:6px 10px" onclick="abrirBorrador(findPrenda('${p.ID}'))">🧽 Borrador</button>
+      <button class="remove" onclick="pedirEliminarPrenda('${p.ID}')" title="Eliminar">🗑</button>
+    </div>`).join('');
+}
 
 // ── Recorte manual antes de analizar: la IA solo ve lo que el usuario
 // deja dentro del cuadro (pedido explícito: no mandar la foto completa
@@ -699,7 +814,7 @@ async function analizarFotoOrigenExistente(url){
   const r = await apiPost('descargarImagenDrive', { fileId });
   if(!r.ok){ showToast('No se pudo cargar: '+(r.error||'sin conexión')); return; }
   const resized = await imagenDesdeBase64(r.base64, r.mimeType, 1280);
-  uploadQueue = []; uploadIndex = 0;
+  uploadQueue = []; uploadIndex = 0; prendasDeEsteLote = [];
   document.getElementById('uploadProgressWrap').classList.add('hidden');
   switchTab('subir');
   mostrarRecorteManual(resized, {
@@ -917,22 +1032,23 @@ const MANIQUI_CANVAS = { w: 720, h: 1280 };
 // no del cuerpo. No dependen de que la IA replique la pose — son fijas
 // porque el maniquí siempre es el mismo (una vez generado, se cachea).
 const ANCLAS_MANIQUI = { cabeza:4.0, rostro:10.0, cuello:16.0, hombros:20.0, pecho:28.9, cintura:40.0, cadera:45.8, munecas:47.0, rodillas:73.4, tobillos:90.4, pies:93.0 };
-// Por categoría: ancho objetivo (% del lienzo) y a qué ancla se alinea
-// el borde superior (o inferior, para calzado) de la prenda. La altura
-// nunca se fuerza — se preserva la proporción real de cada prenda
-// (recorte apaisado o largo cae donde le corresponda según su propio
-// bbox), solo se ancla un punto y se escala por el ancho.
-const REGLAS_ANCLA = {
-  'Ropa superior': { ancho:46, vAlign:'top',    anclaY:'hombros' },
-  'Vestidos':      { ancho:46, vAlign:'top',    anclaY:'hombros' },
-  'Abrigos':       { ancho:54, vAlign:'top',    anclaY:'hombros' },
-  'Ropa inferior': { ancho:38, vAlign:'top',    anclaY:'cintura' },
-  'Calzado':       { ancho:30, vAlign:'bottom', anclaY:'pies' },
-  'Accesorios':    { ancho:20, vAlign:'top',    anclaY:'pecho' },
-  'Bolsos':        { ancho:28, vAlign:'top',    anclaY:'cadera' },
-  'Ropa interior': { ancho:40, vAlign:'top',    anclaY:'cintura' },
-  'Deportiva':     { ancho:46, vAlign:'top',    anclaY:'hombros' }
+// Por ZONA (no por categoría fija): ancho objetivo (% del lienzo) y a
+// qué ancla se alinea el borde superior (o inferior, para calzado) de la
+// prenda. La altura nunca se fuerza — se preserva la proporción real de
+// cada prenda (recorte apaisado o largo cae donde le corresponda según
+// su propio bbox), solo se ancla un punto y se escala por el ancho.
+// Antes esto vivía fijo por categoría (REGLAS_ANCLA); ahora la usuaria
+// elige la zona de cada categoría desde Perfil (ver CATEGORIA_ZONA
+// arriba), así que la regla se resuelve por zona, no por nombre.
+const ZONA_PRESET = {
+  arriba:    { ancho:46, vAlign:'top',    anclaY:'hombros' }, // playeras, blusas, vestidos, abrigos — "cuerpo completo" también cae aquí: mismo ancla, el largo real lo pone la foto
+  abajo:     { ancho:38, vAlign:'top',    anclaY:'cintura' }, // pantalones, faldas, ropa interior
+  pies:      { ancho:30, vAlign:'bottom', anclaY:'pies' },    // calzado
+  cabeza:    { ancho:32, vAlign:'top',    anclaY:'cabeza' },  // cabello, gorros
+  accesorio: { ancho:20, vAlign:'top',    anclaY:'pecho' },   // accesorios variados
+  colgante:  { ancho:28, vAlign:'top',    anclaY:'cadera' }   // bolsos
 };
+function reglaAnclaPorCategoria(cat){ return ZONA_PRESET[CATEGORIA_ZONA[cat]] || ZONA_PRESET.arriba; }
 // ------------------------------------------------------------
 //  MOLDES por tipo de prenda
 // ------------------------------------------------------------
@@ -949,7 +1065,7 @@ const REGLAS_ANCLA = {
 // la IA o la usuaria). Cada foto nueva NO se acomoda desde cero: se
 // escala y se traslada hasta calzar en el molde de su tipo, así que
 // siempre cae donde ya sabemos que se ve bien. Si el Tipo no coincide
-// con ningún molde, cae a la regla de categoría de siempre (REGLAS_ANCLA).
+// con ningún molde, cae a la regla de zona de su categoría (reglaAnclaPorCategoria).
 //
 // Los moldes se pueden re-ajustar a mano una sola vez (Perfil → "Moldes
 // del maniquí", o guardando un "✋ Ajustar en maniquí" como molde) y el
@@ -1032,7 +1148,7 @@ function reglaAnclaParaPrenda(categoria, tipo){
   const clave = claveMoldeParaPrenda(categoria, tipo);
   const r = clave ? reglaMolde(clave) : null;
   if(r) return r;
-  return REGLAS_ANCLA[categoria] || REGLAS_ANCLA['Ropa superior'];
+  return reglaAnclaPorCategoria(categoria);
 }
 // Derivar un molde a partir de una capa que ya quedó bien (el resultado
 // de "✋ Ajustar en maniquí"): el rectángulo real que ocupa esa prenda en
@@ -1438,6 +1554,7 @@ async function guardarDetecciones(){
     }
   }
   localStorage.setItem('ropa_data_cache', JSON.stringify(DATA));
+  prendasDeEsteLote.push(...todosLosIds);
   showToast('✓ Prendas guardadas');
   uploadIndex++;
   procesarSiguienteFoto();
@@ -2230,21 +2347,26 @@ async function abrirBorrador(p){
   // bloquea el paneo nativo del navegador (lo necesita para dibujar con
   // un dedo), así que el paneo con dos dedos se maneja a mano aquí.
   const scrollWrap = document.getElementById('borradorScrollWrap');
+  const zoomSlider = document.getElementById('borradorZoom');
   const punteros = new Map();
   let panActivo = null;
   const centroide = ()=>{
     const pts = Array.from(punteros.values());
     return { x:(pts[0].x+pts[1].x)/2, y:(pts[0].y+pts[1].y)/2 };
   };
+  const distanciaEntreDedos = ()=>{
+    const pts = Array.from(punteros.values());
+    return Math.hypot(pts[0].x-pts[1].x, pts[0].y-pts[1].y);
+  };
   canvas.addEventListener('pointerdown', e=>{
     punteros.set(e.pointerId, { x:e.clientX, y:e.clientY });
     canvas.setPointerCapture(e.pointerId);
     if(punteros.size>=2){
       // Dos dedos: cancela cualquier trazo que se hubiera empezado con el
-      // primer dedo y pasa a modo paneo.
+      // primer dedo y pasa a modo paneo + pellizcar para zoom.
       activo = false;
       ctx.clearRect(0,0,canvas.width,canvas.height); ctx.drawImage(buffer,0,0);
-      panActivo = { centro: centroide(), scrollLeft: scrollWrap.scrollLeft, scrollTop: scrollWrap.scrollTop };
+      panActivo = { centro: centroide(), scrollLeft: scrollWrap.scrollLeft, scrollTop: scrollWrap.scrollTop, distInicial: distanciaEntreDedos(), zoomInicial: Number(zoomSlider.value) };
       return;
     }
     const pos = posEnCanvas(e);
@@ -2272,6 +2394,13 @@ async function abrirBorrador(p){
   canvas.addEventListener('pointermove', e=>{
     if(punteros.has(e.pointerId)) punteros.set(e.pointerId, { x:e.clientX, y:e.clientY });
     if(panActivo && punteros.size>=2){
+      if(panActivo.distInicial>0){
+        const nuevoZoom = Math.max(100, Math.min(500, Math.round(panActivo.zoomInicial * distanciaEntreDedos()/panActivo.distInicial)));
+        if(nuevoZoom !== Number(zoomSlider.value)){
+          zoomSlider.value = nuevoZoom;
+          wrap.style.width = (280*nuevoZoom/100)+'px';
+        }
+      }
       const c = centroide();
       scrollWrap.scrollLeft = panActivo.scrollLeft - (c.x - panActivo.centro.x);
       scrollWrap.scrollTop = panActivo.scrollTop - (c.y - panActivo.centro.y);
@@ -3460,7 +3589,124 @@ function renderPerfilScreen(){
   document.getElementById('perfilVersionTexto').textContent = BUILD_VERSION;
   document.getElementById('perfilNotas').value = p.Notas || '';
   renderMoldes();
+  renderCategoriasPerfil();
   renderFotosSubidas();
+}
+// ------------------------------------------------------------
+//  Categorías de prendas (Perfil) — editables por la usuaria
+// ------------------------------------------------------------
+const ZONA_ETIQUETA = {
+  arriba: '🔝 Arriba / cuerpo completo (playeras, blusas, vestidos, abrigos)',
+  abajo: '👖 Abajo (pantalones, faldas, ropa interior)',
+  pies: '👟 Pies (calzado)',
+  cabeza: '💇 Cabeza (cabello, gorros)',
+  accesorio: '💎 Accesorio (centro del cuerpo)',
+  colgante: '👜 Colgante (bolsos, a la cadera)'
+};
+function renderCategoriasPerfil(){
+  const cont = document.getElementById('categoriasArea');
+  if(!cont) return;
+  cont.innerHTML = CATEGORIAS.map(c=>{
+    const n = itemsPorCategoria(c).length;
+    return `<div class="capa-row" style="flex-wrap:wrap;gap:6px">
+      <div class="capa-row-info">
+        <b>${CATEGORIA_ICONO[c]||'🏷️'} ${escAttr(c)}</b>
+        <br><span class="hint">${ZONA_ETIQUETA[CATEGORIA_ZONA[c]]||''} · ${n} prenda(s)</span>
+      </div>
+      <button class="btn ghost" style="font-size:12px;padding:6px 10px" onclick="abrirFormCategoria('${escAttr(c)}')">✏️ Editar</button>
+      <button class="remove" onclick="eliminarCategoria('${escAttr(c)}')" title="Eliminar">🗑</button>
+    </div>`;
+  }).join('');
+}
+// nombreExistente vacío/omitido = agregar nueva; con valor = editar esa.
+function abrirFormCategoria(nombreExistente){
+  const esNueva = !nombreExistente;
+  const zonaActual = nombreExistente ? (CATEGORIA_ZONA[nombreExistente]||'arriba') : 'arriba';
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay';
+  overlay.innerHTML = `<div class="modal">
+    <h3>${esNueva?'Agregar categoría':'Editar categoría'}</h3>
+    <div class="field"><label>Nombre</label><input id="catNombre" value="${escAttr(nombreExistente||'')}" placeholder="ej: Pijamas"></div>
+    <div class="field"><label class="hint">¿A qué parte del cuerpo corresponde?</label>
+      <div class="chips" id="catZonaChips" style="flex-wrap:wrap">
+        ${Object.entries(ZONA_ETIQUETA).map(([z,txt])=>`<button class="chip ${z===zonaActual?'active':''}" data-zona="${z}" onclick="document.querySelectorAll('#catZonaChips .chip').forEach(b=>b.classList.toggle('active',b===this))">${txt}</button>`).join('')}
+      </div>
+    </div>
+    <div class="actions">
+      <button class="btn ghost" id="catCancelar">Cancelar</button>
+      <button class="btn" id="catGuardar">Guardar</button>
+    </div>
+  </div>`;
+  document.body.appendChild(overlay);
+  overlay.addEventListener('click', e=>{ if(e.target===overlay) overlay.remove(); });
+  overlay.querySelector('#catCancelar').onclick = ()=> overlay.remove();
+  overlay.querySelector('#catGuardar').onclick = async ()=>{
+    const nombreNuevo = document.getElementById('catNombre').value.trim();
+    if(!nombreNuevo){ showToast('Ponle un nombre'); return; }
+    const zonaBtn = document.querySelector('#catZonaChips .chip.active');
+    const zona = zonaBtn ? zonaBtn.dataset.zona : 'arriba';
+    overlay.remove();
+    await guardarCategoria(nombreExistente, nombreNuevo, zona);
+  };
+}
+async function guardarCategoria(nombreAnterior, nombreNuevo, zona){
+  if(!nombreAnterior){
+    // Nueva categoría — si el nombre ya existe, solo se actualiza su zona.
+    if(!CATEGORIAS.includes(nombreNuevo)) CATEGORIAS.push(nombreNuevo);
+    CATEGORIA_ZONA[nombreNuevo] = zona;
+    if(!CATEGORIA_ICONO[nombreNuevo]) CATEGORIA_ICONO[nombreNuevo] = '🏷️';
+    guardarCategoriasPersonalizadas();
+    renderCategoriasPerfil();
+    showToast('Categoría agregada');
+    return;
+  }
+  const nombreCambio = nombreNuevo !== nombreAnterior;
+  const fusion = nombreCambio && CATEGORIAS.includes(nombreNuevo);
+  const afectadas = nombreCambio ? DATA.prendas.filter(p=>p.Categoria===nombreAnterior && !esVerdadero(p.Papelera)) : [];
+  const aplicar = async ()=>{
+    for(let i=0;i<afectadas.length;i++){
+      afectadas[i].Categoria = nombreNuevo;
+      await apiPost('saveRow', { table:'PRENDAS', row:afectadas[i] });
+    }
+    if(nombreCambio){
+      CATEGORIAS = CATEGORIAS.filter(c=>c!==nombreAnterior);
+      if(!CATEGORIAS.includes(nombreNuevo)) CATEGORIAS.push(nombreNuevo);
+      delete CATEGORIA_ZONA[nombreAnterior];
+      delete CATEGORIA_ICONO[nombreAnterior];
+    }
+    CATEGORIA_ZONA[nombreNuevo] = zona;
+    if(!CATEGORIA_ICONO[nombreNuevo]) CATEGORIA_ICONO[nombreNuevo] = '🏷️';
+    guardarCategoriasPersonalizadas();
+    if(afectadas.length) localStorage.setItem('ropa_data_cache', JSON.stringify(DATA));
+    renderCategoriasPerfil();
+    renderCatalogo();
+    showToast(fusion ? `Fusionada con "${nombreNuevo}"` : 'Categoría actualizada');
+  };
+  if(afectadas.length){
+    confirmarEliminar(`Esto va a mover ${afectadas.length} prenda(s) de "${nombreAnterior}" a "${nombreNuevo}". ¿Continuar?`, aplicar);
+  } else if(fusion){
+    CATEGORIAS = CATEGORIAS.filter(c=>c!==nombreAnterior);
+    delete CATEGORIA_ZONA[nombreAnterior];
+    delete CATEGORIA_ICONO[nombreAnterior];
+    CATEGORIA_ZONA[nombreNuevo] = zona;
+    guardarCategoriasPersonalizadas();
+    renderCategoriasPerfil();
+    showToast(`Fusionada con "${nombreNuevo}"`);
+  } else {
+    await aplicar();
+  }
+}
+function eliminarCategoria(nombre){
+  const n = itemsPorCategoria(nombre).length;
+  if(n>0){ showToast(`Tiene ${n} prenda(s) — renómbrala a otra categoría para moverlas antes de eliminarla`); return; }
+  confirmarEliminar(`¿Eliminar la categoría "${nombre}"?`, ()=>{
+    CATEGORIAS = CATEGORIAS.filter(c=>c!==nombre);
+    delete CATEGORIA_ZONA[nombre];
+    delete CATEGORIA_ICONO[nombre];
+    guardarCategoriasPersonalizadas();
+    renderCategoriasPerfil();
+    showToast('Categoría eliminada');
+  });
 }
 // ------------------------------------------------------------
 //  Moldes del maniquí (Perfil)
@@ -3782,8 +4028,7 @@ function renderFotosSubidas(){
         <div style="display:flex;gap:6px;flex-wrap:wrap">${prendas.length ? prendas.map(p=>`<div style="width:44px;cursor:pointer" onclick="abrirCambiarPrendaDeFoto('${p.ID}','${f.URL}')" title="${escAttr(p.Tipo||p.Categoria)}">${fotoRecortadaHtml(p,{estilo:'width:44px;height:44px;object-fit:cover;border-radius:6px', clickable:false, iconoTam:16})}</div>`).join('') : '<span class="hint">Sin prendas activas de esta foto</span>'}</div>
         <input type="date" value="${fechaInput}" onchange="guardarFechaFotoOrigen('${f.URL}',this.value)">
       </div>
-      <button class="btn ghost" style="font-size:12px;padding:6px 10px" onclick="abrirAgregarPrendaAFoto('${f.URL}')">➕ Agregar</button>
-      <button class="btn ghost" style="font-size:12px;padding:6px 10px" onclick="analizarFotoOrigenExistente('${f.URL}')">🔍 Analizar</button>
+      <button class="btn ghost" style="font-size:12px;padding:6px 10px" onclick="abrirElegirOrigenAgregar('${f.URL}')">➕ Agregar</button>
       <button class="remove" onclick="pedirEliminarFotoOrigen('${f.URL}')" title="Quitar esta foto">🗑</button>
     </div>`;
   }).join('');
@@ -3794,6 +4039,28 @@ function renderFotosSubidas(){
 // a esta — "de casualidad ya lo agregué en otro" era el caso explícito.
 // "reemplazarId" (opcional) es la prenda que se está sustituyendo — al
 // elegir la nueva, la vieja se desvincula de esta foto (no se borra).
+// El "➕ Agregar" de cada foto ahora es un mini-menú: del catálogo (la
+// función de abajo) o desde la foto (analizarFotoOrigenExistente, que ya
+// existía como botón "🔍 Analizar" — se fusiona aquí, misma función, sin
+// duplicar lógica). "Desde la foto" ya evita gastar créditos de más: lo
+// que se marca como "ya la tengo" no se vuelve a generar.
+function abrirElegirOrigenAgregar(url){
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay';
+  overlay.innerHTML = `<div class="modal">
+    <h3>Agregar prenda a esta foto</h3>
+    <div class="chips" style="flex-direction:column;align-items:stretch">
+      <button class="btn ghost" id="origenCatalogo">📚 Del catálogo — ya la tengo en otra foto</button>
+      <button class="btn ghost" id="origenFoto">📸 Desde la foto — identificar de nuevo</button>
+    </div>
+    <div class="actions"><button class="btn ghost" id="origenCerrar">Cancelar</button></div>
+  </div>`;
+  document.body.appendChild(overlay);
+  overlay.addEventListener('click', e=>{ if(e.target===overlay) overlay.remove(); });
+  overlay.querySelector('#origenCerrar').onclick = ()=> overlay.remove();
+  overlay.querySelector('#origenCatalogo').onclick = ()=>{ overlay.remove(); abrirAgregarPrendaAFoto(url); };
+  overlay.querySelector('#origenFoto').onclick = ()=>{ overlay.remove(); analizarFotoOrigenExistente(url); };
+}
 function abrirAgregarPrendaAFoto(url, reemplazarId){
   const cats = CATEGORIAS.filter(c=>itemsPorCategoria(c).length);
   if(!cats.length){ showToast('Todavía no tienes prendas en el catálogo'); return; }
