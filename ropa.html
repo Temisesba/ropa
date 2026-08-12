@@ -351,7 +351,7 @@ let SHEET_URL = '';
 // Nombre-landmark de esta versión — cámbialo en cada cambio que se
 // despliegue, así se puede saber a simple vista (en Perfil) si el
 // celular ya está viendo lo último o una copia vieja en caché.
-const BUILD_VERSION = 'Uxmal';
+const BUILD_VERSION = 'Palenque';
 let DATA = { prendas: [], usos: [], outfits_sugeridos: [], perfil: [], fotos_origen: [] };
 let showTrash = false;
 let soloFavoritos = false;
@@ -3559,6 +3559,18 @@ function editarPrendasDeUso(usoId){
   outfitBoardGuardado = outfitBoard;
   usoEnEdicion = u;
   outfitBoard = { capas: ids.filter(id=>findPrenda(id)) };
+  // Si el Vestidor real ya se abrió antes en esta sesión, deja su propio
+  // #vestidorPreview/#capasListaOutfit ocultos en el DOM (nunca se
+  // destruyen al cambiar de pestaña). getElementById siempre regresa el
+  // PRIMERO que encuentra en el documento — sin esto, este modal (que se
+  // agrega al final del <body>) terminaría actualizando por error esos
+  // elementos ocultos en vez de los suyos propios, y se quedaría
+  // pegado en "Cargando maniquí…" para siempre. Se renombran mientras
+  // el modal está abierto y se restauran al cerrar.
+  const vestidorRealPreview = document.getElementById('vestidorPreview');
+  const vestidorRealLista = document.getElementById('capasListaOutfit');
+  if(vestidorRealPreview) vestidorRealPreview.id = 'vestidorPreview-real-tmp';
+  if(vestidorRealLista) vestidorRealLista.id = 'capasListaOutfit-real-tmp';
   const overlay = document.createElement('div');
   overlay.className = 'modal-overlay';
   overlay.id = 'editarUsoOverlay';
@@ -3600,6 +3612,10 @@ async function cerrarEditarUso(guardar){
     renderCalendario();
   }
   if(overlay) overlay.remove();
+  const vestidorRealPreview = document.getElementById('vestidorPreview-real-tmp');
+  const vestidorRealLista = document.getElementById('capasListaOutfit-real-tmp');
+  if(vestidorRealPreview) vestidorRealPreview.id = 'vestidorPreview';
+  if(vestidorRealLista) vestidorRealLista.id = 'capasListaOutfit';
   outfitBoard = outfitBoardGuardado;
   outfitBoardGuardado = null;
   usoEnEdicion = null;
