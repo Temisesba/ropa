@@ -351,7 +351,7 @@ let SHEET_URL = '';
 // Nombre-landmark de esta versión — cámbialo en cada cambio que se
 // despliegue, así se puede saber a simple vista (en Perfil) si el
 // celular ya está viendo lo último o una copia vieja en caché.
-const BUILD_VERSION = 'Chichen Itza';
+const BUILD_VERSION = 'Coba';
 let DATA = { prendas: [], usos: [], outfits_sugeridos: [], perfil: [], fotos_origen: [] };
 let showTrash = false;
 let soloFavoritos = false;
@@ -3088,6 +3088,19 @@ function outfitGuardadoCardHtml(o, maniquiInfo){
 let outfitBoard = null; // { capas: [ids en orden, de abajo hacia arriba] }
 function prendasActivas(){ return DATA.prendas.filter(p=>!esVerdadero(p.Papelera)); }
 function itemsPorCategoria(cat){ return prendasActivas().filter(p=>p.Categoria===cat); }
+// Una capa normalmente es un ID real de PRENDAS — pero el carrusel ‹›
+// también puede dejarla en "nada" (ej. "me quito la chamarra pero
+// quiero poder volver a ponérmela deslizando, sin borrar y re-agregar")
+// usando este centinela en vez de un ID real. findPrenda() de un
+// centinela regresa undefined a propósito — así todo el código que ya
+// hacía `.map(id=>findPrenda(id)).filter(Boolean)` (la lista de capas,
+// el resumen de texto, "Ideas") lo ignora sin tocarlo; solo el
+// carrusel y el dibujo sobre el maniquí necesitan reconocerlo, y los
+// lugares que SÍ guardan la lista (PrendaIDsJSON, llamadas a IA) deben
+// filtrarlo explícito antes de usarla.
+function claveNinguno(categoria){ return 'ninguno:'+categoria; }
+function esNinguno(id){ return typeof id==='string' && id.indexOf('ninguno:')===0; }
+function categoriaDeNinguno(id){ return id.slice('ninguno:'.length); }
 function abrirVestidor(){
   if(!outfitBoard){
     const inicial = [];
@@ -3097,7 +3110,7 @@ function abrirVestidor(){
     });
     outfitBoard = { capas: inicial };
   } else {
-    outfitBoard.capas = outfitBoard.capas.filter(id=>findPrenda(id));
+    outfitBoard.capas = outfitBoard.capas.filter(id=>findPrenda(id)||esNinguno(id));
   }
   renderTableroOutfit();
 }
@@ -3117,7 +3130,7 @@ function renderTableroOutfit(){
       <button class="btn" onclick="usarTableroOutfitHoy()">Usar este outfit hoy</button>
       <button class="btn secondary" onclick="guardarOutfitDelArmador()">💾 Guardar outfit</button>
       <button class="btn secondary" id="btnFeedbackOutfit" onclick="pedirFeedbackOutfit()">💬 Feedback del outfit</button>
-      <button class="btn secondary" id="btnMejorarVestidor" onclick="mejorarOutfitConIA(outfitBoard.capas, 'mejoradoVestidorArea', 'btnMejorarVestidor')">✨ Mejorar con IA</button>
+      <button class="btn secondary" id="btnMejorarVestidor" onclick="mejorarOutfitConIA(outfitBoard.capas.filter(id=>findPrenda(id)), 'mejoradoVestidorArea', 'btnMejorarVestidor')">✨ Mejorar con IA</button>
     </div>
     <div id="mejoradoVestidorArea"></div>
     <div id="feedbackOutfitArea"></div>
@@ -3169,8 +3182,8 @@ const FILA_FLECHA_CATEGORIA = {
 // de categorías siempre da los mismos renglones.
 function filasFlechas(ids){
   const base = ids.map(id=>{
-    const p = findPrenda(id);
-    const v = p ? FILA_FLECHA_CATEGORIA[p.Categoria] : undefined;
+    const cat = esNinguno(id) ? categoriaDeNinguno(id) : (findPrenda(id)||{}).Categoria;
+    const v = cat ? FILA_FLECHA_CATEGORIA[cat] : undefined;
     return (v===undefined) ? 50 : v;
   });
   const orden = base.map((v,i)=>({i,v})).sort((a,b)=>a.v-b.v);
@@ -3184,10 +3197,22 @@ function filasFlechas(ids){
 function capasHtml(){
   const filas = filasFlechas(outfitBoard.capas);
   return outfitBoard.capas.map((id, i)=>{
+    if(esNinguno(id)){
+      // Sin capa que dibujar (esta categoría está en "nada") — pero SÍ
+      // las flechas, si hay al menos una prenda real a la que volver.
+      const cat = categoriaDeNinguno(id);
+      if(itemsPorCategoria(cat).length<1) return '';
+      const topPct = filas[i];
+      return `<button class="maniqui-arrow left" style="top:${topPct}%" onclick="cambiarPrendaCarrusel('${id}',-1)" title="Elegir ${escAttr(cat)}">‹</button>` +
+        `<button class="maniqui-arrow right" style="top:${topPct}%" onclick="cambiarPrendaCarrusel('${id}',1)" title="Elegir ${escAttr(cat)}">›</button>`;
+    }
     const p = findPrenda(id);
     if(!p || !p.FotoGeneradaURL) return '';
     let flechas = '';
-    if(itemsPorCategoria(p.Categoria).length>1){
+    if(itemsPorCategoria(p.Categoria).length>=1){
+      // "nada" siempre cuenta como una opción más en la vuelta del
+      // carrusel, así que con una sola prenda real ya vale la pena
+      // poder alternar entre "puesta" y "nada".
       const topPct = filas[i];
       flechas = `<button class="maniqui-arrow left" style="top:${topPct}%" onclick="cambiarPrendaCarrusel('${p.ID}',-1)" title="Prenda anterior de ${escAttr(p.Categoria)}">‹</button>` +
         `<button class="maniqui-arrow right" style="top:${topPct}%" onclick="cambiarPrendaCarrusel('${p.ID}',1)" title="Siguiente prenda de ${escAttr(p.Categoria)}">›</button>`;
@@ -3223,18 +3248,22 @@ function renderCapasLista(){
 // misma categoría, sin tocar su lugar en el orden de capas (arriba/abajo)
 // ni abrir el menú de "Agregar prenda" — instantáneo, misma composición
 // por capas de siempre.
+// "nada" siempre se agrega al final de la vuelta, como una opción más
+// de la categoría — así se puede deslizar hasta "sin chamarra" y de
+// vuelta a la chamarra, sin borrar la capa y tener que re-agregarla.
 function cambiarPrendaCarrusel(idActual, direccion){
-  const p = findPrenda(idActual);
-  if(!p) return;
-  const opciones = itemsPorCategoria(p.Categoria);
-  if(opciones.length<=1) return;
-  const idxActual = opciones.findIndex(x=>x.ID===idActual);
+  const categoria = esNinguno(idActual) ? categoriaDeNinguno(idActual) : (findPrenda(idActual)||{}).Categoria;
+  if(!categoria) return;
+  const reales = itemsPorCategoria(categoria);
+  if(!reales.length) return;
+  const opciones = [...reales.map(p=>p.ID), claveNinguno(categoria)];
+  const idxActual = opciones.indexOf(idActual);
   let nuevoIdx = (idxActual<0?0:idxActual) + direccion;
   if(nuevoIdx<0) nuevoIdx = opciones.length-1;
   if(nuevoIdx>=opciones.length) nuevoIdx = 0;
   const capaIdx = outfitBoard.capas.indexOf(idActual);
   if(capaIdx<0) return;
-  outfitBoard.capas[capaIdx] = opciones[nuevoIdx].ID;
+  outfitBoard.capas[capaIdx] = opciones[nuevoIdx];
   const cont = document.getElementById('vestidorPreview');
   if(cont){ const base = cont.querySelector('.maniqui-doll-base'); const pelo = cont.querySelector('.maniqui-pelo'); cont.innerHTML = (base?base.outerHTML:'') + (pelo?pelo.outerHTML:'') + capasHtml(); }
   renderCapasLista();
@@ -3271,7 +3300,16 @@ function quitarCapaOutfit(id){
   actualizarResumenOutfit();
 }
 function agregarCapaOutfit(id){
-  if(!outfitBoard.capas.includes(id)) outfitBoard.capas.push(id);
+  if(!outfitBoard.capas.includes(id)){
+    // Si esa categoría ya está representada por un centinela "nada"
+    // (dejado ahí por el carrusel), se reemplaza en su mismo lugar en
+    // vez de agregar una entrada aparte — si no, la categoría quedaría
+    // duplicada en la pila de capas.
+    const p = findPrenda(id);
+    const idxNinguno = p ? outfitBoard.capas.indexOf(claveNinguno(p.Categoria)) : -1;
+    if(idxNinguno>=0) outfitBoard.capas[idxNinguno] = id;
+    else outfitBoard.capas.push(id);
+  }
   else outfitBoard.capas = outfitBoard.capas.filter(x=>x!==id);
   const cont = document.getElementById('vestidorPreview');
   if(cont){ const base = cont.querySelector('.maniqui-doll-base'); const pelo = cont.querySelector('.maniqui-pelo'); cont.innerHTML = (base?base.outerHTML:'') + (pelo?pelo.outerHTML:'') + capasHtml(); }
@@ -3317,13 +3355,15 @@ function actualizarResumenOutfit(){
   resumen.textContent = partes.length ? 'Outfit: '+partes.join(' + ') : '';
 }
 async function usarTableroOutfitHoy(){
-  if(!outfitBoard.capas.length){ showToast('Elige al menos una prenda'); return; }
-  await usarOutfitHoy(outfitBoard.capas.slice());
+  const ids = outfitBoard.capas.filter(id=>findPrenda(id));
+  if(!ids.length){ showToast('Elige al menos una prenda'); return; }
+  await usarOutfitHoy(ids);
 }
 async function guardarOutfitDelArmador(){
-  if(!outfitBoard.capas.length){ showToast('Elige al menos una prenda'); return; }
+  const ids = outfitBoard.capas.filter(id=>findPrenda(id));
+  if(!ids.length){ showToast('Elige al menos una prenda'); return; }
   const nota = prompt('¿Notas para este outfit? (opcional)') || '';
-  await guardarOutfitGuardado(outfitBoard.capas.slice(), nota, '', '');
+  await guardarOutfitGuardado(ids, nota, '', '');
 }
 async function pedirFeedbackOutfit(){
   if(!outfitBoard.capas.length){ showToast('Elige al menos una prenda'); return; }
@@ -3639,7 +3679,7 @@ async function cerrarEditarUso(guardar){
   if(guardar && usoEnEdicion){
     const u = usoEnEdicion;
     let idsViejos = []; try{ idsViejos = JSON.parse(u.PrendaIDsJSON||'[]'); }catch(e){}
-    const nuevosIds = outfitBoard.capas.slice();
+    const nuevosIds = outfitBoard.capas.filter(id=>findPrenda(id));
     u.PrendaIDsJSON = JSON.stringify(nuevosIds);
     await apiPost('saveRow', { table:'USOS', row:u });
     const agregados = nuevosIds.filter(id=>!idsViejos.includes(id));
@@ -3914,17 +3954,30 @@ const ZONA_ETIQUETA = {
 function renderCategoriasPerfil(){
   const cont = document.getElementById('categoriasArea');
   if(!cont) return;
-  cont.innerHTML = CATEGORIAS.map(c=>{
+  cont.innerHTML = CATEGORIAS.map((c,i)=>{
     const n = itemsPorCategoria(c).length;
     return `<div class="capa-row" style="flex-wrap:wrap;gap:6px">
       <div class="capa-row-info">
         <b>${CATEGORIA_ICONO[c]||'🏷️'} ${escAttr(c)}</b>
         <br><span class="hint">${ZONA_ETIQUETA[CATEGORIA_ZONA[c]]||''} · ${n} prenda(s)</span>
       </div>
+      <button class="btn ghost" style="padding:4px 8px" ${i===0?'disabled':''} onclick="moverCategoria('${escAttr(c)}',-1)" title="Subir">▲</button>
+      <button class="btn ghost" style="padding:4px 8px" ${i===CATEGORIAS.length-1?'disabled':''} onclick="moverCategoria('${escAttr(c)}',1)" title="Bajar">▼</button>
       <button class="btn ghost" style="font-size:12px;padding:6px 10px" onclick="abrirFormCategoria('${escAttr(c)}')">✏️ Editar</button>
       <button class="remove" onclick="eliminarCategoria('${escAttr(c)}')" title="Eliminar">🗑</button>
     </div>`;
   }).join('');
+}
+// El orden del array CATEGORIAS ya ES el orden que se usa en todos
+// lados que las recorre (Hoy, "+Agregar prenda" del Vestidor, Catálogo)
+// — reordenar aquí no necesita tocar ninguna de esas pantallas.
+function moverCategoria(nombre, delta){
+  const idx = CATEGORIAS.indexOf(nombre);
+  const nuevo = idx+delta;
+  if(idx<0 || nuevo<0 || nuevo>=CATEGORIAS.length) return;
+  [CATEGORIAS[idx], CATEGORIAS[nuevo]] = [CATEGORIAS[nuevo], CATEGORIAS[idx]];
+  guardarCategoriasPersonalizadas();
+  renderCategoriasPerfil();
 }
 // nombreExistente vacío/omitido = agregar nueva; con valor = editar esa.
 function abrirFormCategoria(nombreExistente){
