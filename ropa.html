@@ -121,6 +121,8 @@ nav.tabbar button .ic{font-size:19px}
 .maniqui-arrow{position:absolute;transform:translateY(-50%);width:30px;height:30px;border-radius:50%;background:var(--bg-card);border:1px solid var(--border);font-size:16px;z-index:6;box-shadow:var(--shadow);opacity:.92}
 .maniqui-arrow.left{left:4px}
 .maniqui-arrow.right{right:4px}
+.card-swipe{display:flex;overflow-x:auto;scroll-snap-type:x mandatory;-webkit-overflow-scrolling:touch;border-radius:var(--radius) var(--radius) 0 0}
+.card-swipe>*{flex:0 0 100%;scroll-snap-align:start}
 .capa-row{display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid var(--border)}
 .capa-row:last-child{border-bottom:none}
 .capa-row-info{flex:1;font-size:13px}
@@ -285,14 +287,10 @@ nav.tabbar button .ic{font-size:19px}
           <button class="chip" id="chipEstaturaAlta" onclick="elegirEstaturaManiqui('alta')">📏 Alta</button>
         </div>
       </div>
-      <div class="field"><label class="hint">Peinado del maniquí</label>
-        <div class="chips">
-          <button class="chip" id="chipPeinadoNinguno" onclick="elegirPeinadoManiqui('ninguno')">💇 Sin pelo</button>
-          <button class="chip" id="chipPeinadoSuelto" onclick="elegirPeinadoManiqui('suelto')">💁 Suelto oscuro</button>
-          <button class="chip" id="chipPeinadoColeta" onclick="elegirPeinadoManiqui('coleta')">🎀 Coleta oscura</button>
-          <button class="chip" id="chipPeinadoChongo" onclick="elegirPeinadoManiqui('chongo')">🧑‍🦱 Chongo oscuro</button>
-          <button class="chip" id="chipPeinadoTrenza" onclick="elegirPeinadoManiqui('trenza')">👱‍♀️ Trenza oscura</button>
-        </div>
+      <div class="field"><label class="hint">Estilos de cabello del maniquí</label>
+        <p class="hint">Sube una foto (peluca, o tu cabello ya recortado) o descríbelo y la IA lo genera — queda guardado como cualquier prenda: lo puedes ajustar, cambiar el predeterminado, o eliminarlo.</p>
+        <div id="estilosCabelloArea"></div>
+        <button class="btn secondary" style="margin-top:8px" onclick="abrirElegirOrigenCabello()">➕ Agregar estilo de cabello</button>
       </div>
       <button class="btn" onclick="guardarPerfil()">Guardar perfil</button>
 
@@ -355,7 +353,7 @@ let SHEET_URL = '';
 // Nombre-landmark de esta versión — cámbialo en cada cambio que se
 // despliegue, así se puede saber a simple vista (en Perfil) si el
 // celular ya está viendo lo último o una copia vieja en caché.
-const BUILD_VERSION = 'Chetumal';
+const BUILD_VERSION = 'Cozumel';
 let DATA = { prendas: [], usos: [], outfits_sugeridos: [], perfil: [], fotos_origen: [] };
 let showTrash = false;
 let soloFavoritos = false;
@@ -2974,8 +2972,13 @@ function abrirVestidor(){
 }
 function renderTableroOutfit(){
   const area = document.getElementById('tableroOutfitArea');
+  const hayEstilosCabello = itemsPorCategoria('Cabello').length>0;
   area.innerHTML = `
-    <div class="maniqui-doll-wrap" id="vestidorPreview"><p class="hint" style="padding:60px 0;text-align:center">Cargando maniquí…</p></div>
+    <div style="position:relative">
+      <div class="maniqui-doll-wrap" id="vestidorPreview"><p class="hint" style="padding:60px 0;text-align:center">Cargando maniquí…</p></div>
+      ${hayEstilosCabello ? `<button class="maniqui-arrow left" style="top:8%" onclick="cambiarCabelloCarrusel(-1)" title="Estilo de cabello anterior">‹</button>
+      <button class="maniqui-arrow right" style="top:8%" onclick="cambiarCabelloCarrusel(1)" title="Siguiente estilo de cabello">›</button>` : ''}
+    </div>
     <div id="capasListaOutfit" style="margin-top:10px"></div>
     <button class="btn secondary" style="margin-top:8px" onclick="abrirAgregarCapa()">➕ Agregar prenda</button>
     <p class="hint" style="text-align:center;margin-top:10px" id="resumenOutfit"></p>
@@ -3106,6 +3109,19 @@ function cambiarPrendaCarrusel(idActual, direccion){
   renderCapasLista();
   actualizarResumenOutfit();
 }
+// Mismo carrusel, pero para el cabello del maniquí (no es una capa del
+// outfitBoard, es la prenda predeterminada — ver elegirPeinadoManiqui):
+// cambiar aquí actualiza ese mismo predeterminado, no un estado aparte
+// "solo para este outfit" — pedido explícito: elegirlo en Perfil o
+// ajustarlo en Vestidor es lo mismo.
+async function cambiarCabelloCarrusel(direccion){
+  const opciones = ['ninguno', ...itemsPorCategoria('Cabello').map(p=>p.ID)];
+  if(opciones.length<2) return;
+  const actual = localStorage.getItem('ropa_maniqui_peinado')||'ninguno';
+  let idx = opciones.indexOf(actual); if(idx<0) idx = 0;
+  idx = (idx + direccion + opciones.length) % opciones.length;
+  await elegirPeinadoManiqui(opciones[idx]);
+}
 function moverCapaOutfit(id, delta){
   const idx = outfitBoard.capas.indexOf(id);
   if(idx<0) return;
@@ -3230,7 +3246,7 @@ async function mejorarOutfitConIA(prendaIds, areaId, btnId){
 // "✨ Mejorar con IA". La estatura se resuelve sola desde localStorage si
 // no se pasa explícita, así que los llamados existentes (que solo mandan
 // género) automáticamente usan la que esté elegida en Perfil.
-// El cabello YA NO es parte de esta generación (ver obtenerPeinadoManiqui)
+// El cabello YA NO es parte de esta generación (ver maniquiConPeinadoHtml)
 // — pedido explícito: antes cada combinación con peinado regeneraba el
 // cuerpo completo desde cero, y como la IA no es determinista, el cuerpo
 // mismo (piel, proporciones) salía distinto entre una pestaña y otra.
@@ -3251,36 +3267,24 @@ async function obtenerManiquiBase(genero, estatura){
 // cuerpo YA fijo como referencia (para que encaje exacto en su cabeza),
 // pasado por el mismo quitado de fondo que las prendas — se cachea aparte
 // por género+estatura+peinado. Si el peinado es "ninguno" no genera nada.
-async function obtenerPeinadoManiqui(genero, estatura, peinado){
-  estatura = estatura || localStorage.getItem('ropa_maniqui_estatura') || 'chaparrita';
-  peinado = peinado || localStorage.getItem('ropa_maniqui_peinado') || 'ninguno';
-  if(peinado==='ninguno') return null;
-  const cacheKey = 'ropa_maniqui_peinado_v1_'+genero+'_'+estatura+'_'+peinado;
-  const cached = localStorage.getItem(cacheKey);
-  if(cached){ try{ return JSON.parse(cached); }catch(e){} }
-  const cuerpo = await obtenerManiquiBase(genero, estatura);
-  if(!cuerpo) return null;
-  const gen = await apiPost('generarPeinadoManiqui', { genero, estatura, peinado, maniquiBase64: cuerpo.base64, maniquiMimeType: cuerpo.mimeType });
-  if(!gen.ok) return null;
-  const recorte = await quitarFondoColor('data:'+(gen.mimeType||'image/jpeg')+';base64,'+gen.imageBase64, '#00FF00');
-  if(!capaEsValida(recorte)) return null;
-  const subida = await apiPost('uploadImage', { imageBase64: recorte.base64, mimeType:'image/png', fileName:'peinado-'+genero+'-'+estatura+'-'+peinado+'.png' });
-  if(!subida.ok) return null;
-  const info = { url: subida.url };
-  try{ localStorage.setItem(cacheKey, JSON.stringify(info)); }catch(e){}
-  return info;
-}
 // Helper compartido: el HTML del cuerpo + su cabello (si tiene) encima —
 // se usa en todos los lugares que muestran el maniquí (Ajustar, Vestidor,
 // editor de Moldes, Ideas) para que ninguno se quede mostrando solo el
-// cuerpo sin pelo por accidente.
+// cuerpo sin pelo por accidente. El cabello ya NO se genera aquí: es una
+// prenda normal de categoría "Cabello" (ver renderEstilosCabelloPerfil /
+// generarCabelloConIA) — "ropa_maniqui_peinado" guarda su ID (o 'ninguno'),
+// y su FotoGeneradaURL ya viene recortada y posicionada desde que se creó,
+// así que esto es solo un <img>, sin llamadas IA ni chroma-key en vivo.
 async function maniquiConPeinadoHtml(genero){
-  const [cuerpo, pelo] = await Promise.all([ obtenerManiquiBase(genero), obtenerPeinadoManiqui(genero) ]);
+  const cuerpo = await obtenerManiquiBase(genero);
   if(!cuerpo || !cuerpo.url) return { html:'', cuerpo:null };
+  const peinadoId = localStorage.getItem('ropa_maniqui_peinado')||'ninguno';
+  const prendaCabello = peinadoId!=='ninguno' ? findPrenda(peinadoId) : null;
+  const pelo = prendaCabello && prendaCabello.FotoGeneradaURL ? prendaCabello.FotoGeneradaURL : '';
   // "maniqui-pelo" además de la clase visual — así se puede distinguir
   // del resto de las capas (prendas reales) cuando se reusa el HTML ya
   // renderizado sin volver a pedirlo (ver los querySelector('.maniqui-pelo')).
-  const html = `<img class="maniqui-doll-base" src="${cuerpo.url}">` + (pelo && pelo.url ? `<img class="maniqui-doll-capa-full maniqui-pelo" src="${pelo.url}">` : '');
+  const html = `<img class="maniqui-doll-base" src="${cuerpo.url}">` + (pelo ? `<img class="maniqui-doll-capa-full maniqui-pelo" src="${pelo}">` : '');
   return { html, cuerpo };
 }
 async function base64DeFotoURL(url){
@@ -3332,7 +3336,13 @@ async function renderProximosPlaneados(){
   if(!document.getElementById('proximosPlaneadosLista')) return; // se cambió de pantalla mientras cargaba
   cont.innerHTML = `<div style="display:flex;gap:10px;flex-wrap:wrap">${planeados.map(o=>outfitGuardadoCardHtml(o, maniquiInfo)).join('')}</div>`;
 }
-function renderCalendario(){
+// Cada tarjeta muestra tu foto real del día si existe (como siempre); si
+// no, el maniquí vestido con esas prendas — mismo snippet de composición
+// que ya usa outfitGuardadoCardHtml/pedirSugerenciaParaDia, así que se ve
+// igual que "Próximos planeados" e Ideas. Cuando SÍ hay foto real, el
+// maniquí no desaparece: queda como segunda página a la que se llega
+// deslizando (scroll-snap nativo, sin JS de gestos).
+async function renderCalendario(){
   renderProximosPlaneados();
   const cont = document.getElementById('calendarioLista');
   if(!cont) return;
@@ -3340,13 +3350,27 @@ function renderCalendario(){
     .slice()
     .sort((a,b)=> new Date(b.Fecha).getTime() - new Date(a.Fecha).getTime());
   if(!eventos.length){ cont.innerHTML = '<p class="hint">No hay outfits registrados en este período.</p>'; return; }
+  const genero = localStorage.getItem('ropa_maniqui_genero')||'mujer';
+  const maniquiInfo = await maniquiConPeinadoHtml(genero);
+  if(!document.getElementById('calendarioLista')) return; // se cambió de pantalla mientras cargaba
   cont.innerHTML = eventos.map(u=>{
     let ids = []; try{ ids = JSON.parse(u.PrendaIDsJSON||'[]'); }catch(e){}
     const prendas = ids.map(id=>findPrenda(id)).filter(Boolean);
-    const fotoDia = u.FotoURL ? `<img src="${u.FotoURL}" onclick="verFotoGrande('${u.FotoURL}')" style="width:100%;max-height:180px;object-fit:cover;border-radius:var(--radius) var(--radius) 0 0;cursor:zoom-in">` : '';
+    const capasVestidas = prendas.map(p=>p.FotoGeneradaURL?`<img class="maniqui-doll-capa-full" src="${p.FotoGeneradaURL}">`:'').join('');
+    const hayManiqui = maniquiInfo.cuerpo && capasVestidas;
+    const fotoDia = u.FotoURL ? `<img src="${u.FotoURL}" onclick="verFotoGrande('${u.FotoURL}')" style="width:100%;height:100%;object-fit:cover;cursor:zoom-in">` : '';
+    const maniquiDia = hayManiqui ? `<div class="maniqui-doll-wrap" style="height:180px;max-width:none;margin:0">${maniquiInfo.html}${capasVestidas}</div>` : '';
+    let cabecera = '';
+    if(fotoDia && maniquiDia){
+      cabecera = `<div class="card-swipe" style="height:180px">${fotoDia}${maniquiDia}</div><p class="hint" style="text-align:center;margin:4px 0 0">◂ desliza para ver el maniquí</p>`;
+    } else if(fotoDia){
+      cabecera = `<div style="height:180px;border-radius:var(--radius) var(--radius) 0 0;overflow:hidden">${fotoDia}</div>`;
+    } else if(maniquiDia){
+      cabecera = maniquiDia;
+    }
     const meta = [u.Evento, u.ClimaTexto].filter(Boolean).join(' · ');
     return `<div class="card" style="margin-bottom:12px">
-      ${fotoDia}
+      ${cabecera}
       <div class="body">
         <div class="tipo">${formatoFechaUso(u.Fecha)}</div>
         ${meta?`<div class="meta">${escAttr(meta)}</div>`:''}
@@ -3582,14 +3606,11 @@ function renderPerfilScreen(){
   document.getElementById('chipEstaturaChaparrita').classList.toggle('active', estatura==='chaparrita');
   document.getElementById('chipEstaturaMedia').classList.toggle('active', estatura==='media');
   document.getElementById('chipEstaturaAlta').classList.toggle('active', estatura==='alta');
-  const peinado = localStorage.getItem('ropa_maniqui_peinado')||'ninguno';
-  ['Ninguno','Suelto','Coleta','Chongo','Trenza'].forEach(nombre=>{
-    document.getElementById('chipPeinado'+nombre).classList.toggle('active', peinado===nombre.toLowerCase());
-  });
   document.getElementById('perfilVersionTexto').textContent = BUILD_VERSION;
   document.getElementById('perfilNotas').value = p.Notas || '';
   renderMoldes();
   renderCategoriasPerfil();
+  renderEstilosCabelloPerfil();
   renderFotosSubidas();
 }
 // ------------------------------------------------------------
@@ -3707,6 +3728,105 @@ function eliminarCategoria(nombre){
     renderCategoriasPerfil();
     showToast('Categoría eliminada');
   });
+}
+// ------------------------------------------------------------
+//  Estilos de cabello (Perfil) — cabello dejó de ser un sistema aparte:
+//  cada estilo es una prenda normal, categoría "Cabello" (ya definida en
+//  CATEGORIAS/CATEGORIA_ZONA), así que se crea/ajusta/elimina con las
+//  MISMAS herramientas que cualquier prenda (crearFilaPrenda, molde
+//  'cabello', abrirAjustarManiqui) — esta sección solo la muestra
+//  curada y guarda cuál es la predeterminada (ropa_maniqui_peinado +
+//  PERFIL.ManiquiPeinado, ahora un ID de prenda en vez de un nombre fijo
+//  de 4 opciones).
+// ------------------------------------------------------------
+function renderEstilosCabelloPerfil(){
+  const cont = document.getElementById('estilosCabelloArea');
+  if(!cont) return;
+  const peinado = localStorage.getItem('ropa_maniqui_peinado')||'ninguno';
+  const estilos = itemsPorCategoria('Cabello');
+  let html = `<div class="capa-row" style="flex-wrap:wrap;gap:6px">
+    <div class="capa-row-info"><b>💇 Sin pelo</b>${peinado==='ninguno'?' <span class="hint">✓ predeterminado</span>':''}</div>
+    ${peinado==='ninguno'?'':`<button class="btn ghost" style="font-size:12px;padding:6px 10px" onclick="elegirPeinadoManiqui('ninguno')">Usar</button>`}
+  </div>`;
+  html += estilos.map(p=>{
+    const activo = peinado===p.ID;
+    return `<div class="capa-row" style="flex-wrap:wrap;gap:6px">
+      ${fotoRecortadaHtml(p,{estilo:'width:44px;height:44px;object-fit:cover;border-radius:8px', clickable:false})}
+      <div class="capa-row-info"><b>${escAttr(p.Tipo||'Cabello')}</b>${activo?' <span class="hint">✓ predeterminado</span>':''}</div>
+      ${activo?'':`<button class="btn ghost" style="font-size:12px;padding:6px 10px" onclick="elegirPeinadoManiqui('${p.ID}')">Usar</button>`}
+      <button class="btn ghost" style="font-size:12px;padding:6px 10px" onclick="abrirAjustarManiqui(findPrenda('${p.ID}'))">✋ Ajustar</button>
+      <button class="remove" onclick="eliminarEstiloCabello('${p.ID}')" title="Eliminar">🗑</button>
+    </div>`;
+  }).join('');
+  if(!estilos.length) html += '<p class="hint" style="margin-top:6px">Aún no tienes estilos de cabello — agrega uno abajo.</p>';
+  cont.innerHTML = html;
+}
+function eliminarEstiloCabello(id){
+  const p = findPrenda(id); if(!p) return;
+  confirmarEliminar(`Se moverá "${escAttr(p.Tipo||'Cabello')}" a la papelera.`, async ()=>{
+    p.Papelera = true;
+    if(localStorage.getItem('ropa_maniqui_peinado')===id) await elegirPeinadoManiqui('ninguno');
+    await apiPost('saveRow', { table:'PRENDAS', row:p });
+    localStorage.setItem('ropa_data_cache', JSON.stringify(DATA));
+    renderEstilosCabelloPerfil();
+    showToast('Movido a la papelera');
+  });
+}
+function abrirElegirOrigenCabello(){
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay';
+  overlay.innerHTML = `<div class="modal">
+    <h3>Agregar estilo de cabello</h3>
+    <div class="chips" style="flex-direction:column;align-items:stretch">
+      <button class="btn ghost" id="cabelloFoto">📸 Subir foto (peluca, o solo tu cabello recortado)</button>
+      <button class="btn ghost" id="cabelloIA">✨ Generar con IA (sin foto)</button>
+    </div>
+    <div class="actions"><button class="btn ghost" id="cabelloCerrar">Cancelar</button></div>
+  </div>`;
+  document.body.appendChild(overlay);
+  overlay.addEventListener('click', e=>{ if(e.target===overlay) overlay.remove(); });
+  overlay.querySelector('#cabelloCerrar').onclick = ()=> overlay.remove();
+  overlay.querySelector('#cabelloFoto').onclick = ()=>{
+    overlay.remove();
+    switchTab('subir');
+    document.getElementById('fileInput').click();
+  };
+  overlay.querySelector('#cabelloIA').onclick = ()=>{
+    overlay.remove();
+    const descripcion = prompt('Describe el cabello (color, largo, estilo)… ej: "cabello oscuro suelto con ondas"');
+    if(descripcion && descripcion.trim()) generarCabelloConIA(descripcion.trim());
+  };
+}
+// Genera un estilo sin foto real — mismo pipeline que cualquier prenda
+// (quitarFondoColor + reposicionarCapa con el molde 'cabello') para que
+// la posición/escala final la decida el código, no la IA (ver
+// crearFilaPrenda, mismo principio). Queda guardada como una fila PRENDAS
+// normal y se marca como predeterminada al terminar.
+async function generarCabelloConIA(descripcion){
+  showToast('Generando cabello…');
+  const genero = localStorage.getItem('ropa_maniqui_genero')||'mujer';
+  const maniqui = await obtenerManiquiBase(genero);
+  if(!maniqui){ showToast('No se pudo cargar el maniquí'); return; }
+  const claveHex = '#FF00FF';
+  const gen = await apiPost('generarCabelloIA', { descripcion, maniquiBase64: maniqui.base64, maniquiMimeType: maniqui.mimeType, claveColorHex: claveHex });
+  if(!gen.ok){ showToast('No se pudo generar: '+(gen.error||'sin conexión')); return; }
+  const recorte = await quitarFondoColor('data:'+(gen.mimeType||'image/jpeg')+';base64,'+gen.imageBase64, claveHex);
+  if(!capaEsValida(recorte, 'Cabello')){ showToast('No salió bien — intenta describirlo distinto'); return; }
+  const tipo = 'Cabello (IA): '+descripcion;
+  const reposicionada = await reposicionarCapa(recorte.dataUrl, recorte.bboxPct, 'Cabello', tipo);
+  const final = reposicionada || recorte;
+  const subida = await apiPost('uploadImage', { imageBase64: final.base64, mimeType:'image/png', fileName:'cabello-'+Date.now()+'.png' });
+  if(!subida.ok){ showToast('No se pudo guardar la imagen'); return; }
+  const row = {
+    ID: uid(), Categoria:'Cabello', Tipo: tipo, Color:'', ColorSecundario:'', Estampado:'', Marca:'', Temporada:'',
+    Formalidad:'', FotoURL: subida.url, FotoGeneradaURL: subida.url, BBoxJSON: JSON.stringify(final.bboxPct), ClaveColor:'magenta '+claveHex, FotoRealURL:'', FotoOrigenURL:'', FotoManiquiURL:'', FechaAlta: new Date().toISOString(),
+    UltimoUso:'', VecesUsado:0, Favorito:false, Notas:'', Papelera:false
+  };
+  await apiPost('saveRow', { table:'PRENDAS', row });
+  DATA.prendas.push(row);
+  localStorage.setItem('ropa_data_cache', JSON.stringify(DATA));
+  await elegirPeinadoManiqui(row.ID);
+  showToast('✓ Estilo de cabello agregado');
 }
 // ------------------------------------------------------------
 //  Moldes del maniquí (Perfil)
@@ -3974,19 +4094,15 @@ async function elegirEstaturaManiqui(estatura){
   showToast(ok ? 'Maniquí '+estatura+' listo' : 'No se pudo preparar el maniquí, se generará después');
   if(ok) refrescarVestidorManiqui();
 }
-// Igual patrón, para el peinado — pedido explícito: pelucas de cabello
-// oscuro sueltas o recogidas, además de la opción sin pelo de siempre.
+// "peinado" ahora es un ID de prenda de categoría "Cabello" (o 'ninguno')
+// — el cabello ya no se genera aquí, esto solo cambia CUÁL prenda usar
+// como capa fija del maniquí (ver maniquiConPeinadoHtml). Sin llamada IA,
+// así que es instantáneo.
 async function elegirPeinadoManiqui(peinado){
   localStorage.setItem('ropa_maniqui_peinado', peinado);
   guardarCampoPerfil('ManiquiPeinado', peinado);
-  const chips = { ninguno:'chipPeinadoNinguno', suelto:'chipPeinadoSuelto', coleta:'chipPeinadoColeta', chongo:'chipPeinadoChongo', trenza:'chipPeinadoTrenza' };
-  Object.entries(chips).forEach(([k,id])=> document.getElementById(id).classList.toggle('active', k===peinado));
-  const genero = localStorage.getItem('ropa_maniqui_genero')||'mujer';
-  const estatura = localStorage.getItem('ropa_maniqui_estatura')||'chaparrita';
-  showToast('Preparando maniquí…');
-  const ok = await obtenerManiquiBase(genero, estatura, peinado);
-  showToast(ok ? 'Maniquí listo' : 'No se pudo preparar el maniquí, se generará después');
-  if(ok) refrescarVestidorManiqui();
+  renderEstilosCabelloPerfil();
+  await refrescarVestidorManiqui();
 }
 // Se lista desde DATA.fotos_origen (persistente) y NO derivado de las
 // prendas activas — si borras todas las prendas de una foto, la foto
