@@ -351,7 +351,7 @@ let SHEET_URL = '';
 // Nombre-landmark de esta versión — cámbialo en cada cambio que se
 // despliegue, así se puede saber a simple vista (en Perfil) si el
 // celular ya está viendo lo último o una copia vieja en caché.
-const BUILD_VERSION = 'Xcaret';
+const BUILD_VERSION = 'Xel-Ha';
 let DATA = { prendas: [], usos: [], outfits_sugeridos: [], perfil: [], fotos_origen: [] };
 let showTrash = false;
 let soloFavoritos = false;
@@ -2321,6 +2321,12 @@ async function abrirBorrador(p){
   document.body.appendChild(overlay);
   const wrap = document.getElementById('borradorWrap');
   wrap.style.width = '280px';
+  // El maniquí nunca debe "atrapar" el clic/toque, ni estando encima ni
+  // debajo — es puro papel calca visual, el lienzo de abajo es lo único
+  // que dibuja/borra. Sin esto, con "Maniquí encima" activo, la imagen
+  // del maniquí (su rectángulo completo, no solo donde se ve el cuerpo)
+  // bloquearía el borrador justo donde más se necesita usarlo.
+  wrap.querySelectorAll('.maniqui-doll-base, .maniqui-pelo').forEach(el=> el.style.pointerEvents = 'none');
   const canvas = document.getElementById('borradorCanvas');
   canvas.width = img.naturalWidth; canvas.height = img.naturalHeight;
   const ctx = canvas.getContext('2d');
