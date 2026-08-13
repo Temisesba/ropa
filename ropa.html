@@ -351,7 +351,7 @@ let SHEET_URL = '';
 // Nombre-landmark de esta versión — cámbialo en cada cambio que se
 // despliegue, así se puede saber a simple vista (en Perfil) si el
 // celular ya está viendo lo último o una copia vieja en caché.
-const BUILD_VERSION = 'Sian Kaan';
+const BUILD_VERSION = 'Cenote Azul';
 let DATA = { prendas: [], usos: [], outfits_sugeridos: [], perfil: [], fotos_origen: [] };
 let showTrash = false;
 let soloFavoritos = false;
@@ -2298,6 +2298,7 @@ async function abrirBorrador(p){
     <div class="chips" id="lazoAcciones" style="display:none;justify-content:center;margin-top:4px">
       <button class="chip" id="lazoBorrar">✓ Borrar</button>
       <button class="chip" id="lazoMover">🤚 Mover</button>
+      <button class="chip" id="lazoLlenar" title="Rellena con el color de la tela que está justo alrededor">🎨 Llenar</button>
       <button class="chip" id="lazoCancelar">✗ Cancelar</button>
     </div>
     <p class="hint" style="text-align:center;margin-top:4px">📌 Con dos dedos te mueves por la imagen sin borrar nada</p>
@@ -2482,6 +2483,47 @@ async function abrirBorrador(p){
     c.save();
     trazarPathLazo(c); c.closePath(); c.clip();
   };
+  // Ray-casting clásico: ¿el punto (x,y) cae dentro del polígono del
+  // lazo? Se usa para "🎨 Llenar" — necesita distinguir "tela real justo
+  // afuera del contorno" de "lo que va a quedar borrado", cosa que un
+  // clip() de canvas no expone directo (solo sirve para RECORTAR, no
+  // para preguntar adentro/afuera desde JS).
+  const dentroDelPoligono = (x, y, puntos)=>{
+    let dentro = false;
+    for(let i=0, j=puntos.length-1; i<puntos.length; j=i++){
+      const xi=puntos[i].x, yi=puntos[i].y, xj=puntos[j].x, yj=puntos[j].y;
+      const interseca = ((yi>y)!==(yj>y)) && (x < (xj-xi)*(y-yi)/(yj-yi)+xi);
+      if(interseca) dentro = !dentro;
+    }
+    return dentro;
+  };
+  // Color promedio de la tela real justo ALREDEDOR del contorno (una
+  // franja de "margen" px por fuera) — para que "Llenar" tape un hueco
+  // con un color creíble en vez de uno cualquiera. Si no hay tela
+  // opaca cerca (el lazo tocó el borde de la prenda), regresa null.
+  const colorTelaAlrededorDeLazo = ()=>{
+    const margen = 16;
+    let minX=Infinity,minY=Infinity,maxX=-Infinity,maxY=-Infinity;
+    lazoPuntos.forEach(p=>{ minX=Math.min(minX,p.x); minY=Math.min(minY,p.y); maxX=Math.max(maxX,p.x); maxY=Math.max(maxY,p.y); });
+    const x0 = Math.max(0, Math.floor(minX-margen)), y0 = Math.max(0, Math.floor(minY-margen));
+    const x1 = Math.min(buffer.width, Math.ceil(maxX+margen)), y1 = Math.min(buffer.height, Math.ceil(maxY+margen));
+    const w = x1-x0, h = y1-y0;
+    if(w<=0||h<=0) return null;
+    const data = bctx.getImageData(x0,y0,w,h).data;
+    let sr=0,sg=0,sb=0,n=0;
+    const paso = (w*h>40000) ? 2 : 1;
+    for(let py=0; py<h; py+=paso){
+      for(let px=0; px<w; px+=paso){
+        const i = (py*w+px)*4;
+        if(data[i+3] < 200) continue;
+        const xr = x0+px, yr = y0+py;
+        if(dentroDelPoligono(xr, yr, lazoPuntos)) continue;
+        sr+=data[i]; sg+=data[i+1]; sb+=data[i+2]; n++;
+      }
+    }
+    if(!n) return null;
+    return `rgb(${Math.round(sr/n)},${Math.round(sg/n)},${Math.round(sb/n)})`;
+  };
   // "Varita": como el bote de pintura de Paint pero para borrar — un clic
   // selecciona toda la región conectada de color parecido (ej. una manga
   // completa si es de un solo color) y la vuelve transparente de un jalón.
@@ -2652,6 +2694,17 @@ async function abrirBorrador(p){
   canvas.addEventListener('pointerup', soltarPuntero);
   canvas.addEventListener('pointercancel', soltarPuntero);
   document.getElementById('lazoCancelar').onclick = ()=> cancelarLazo();
+  document.getElementById('lazoLlenar').onclick = ()=>{
+    if(lazoPuntos.length<3) return;
+    const color = colorTelaAlrededorDeLazo();
+    if(!color){ showToast('No se detectó tela cerca para tomar el color — prueba con 🧵 Clonar'); return; }
+    guardarHistorial();
+    recortarPorLazo(bctx);
+    bctx.fillStyle = color;
+    bctx.fillRect(0,0,buffer.width,buffer.height);
+    bctx.restore();
+    cancelarLazo();
+  };
   document.getElementById('lazoBorrar').onclick = ()=>{
     if(lazoPuntos.length<3) return;
     guardarHistorial();
