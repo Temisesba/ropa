@@ -351,7 +351,7 @@ let SHEET_URL = '';
 // Nombre-landmark de esta versión — cámbialo en cada cambio que se
 // despliegue, así se puede saber a simple vista (en Perfil) si el
 // celular ya está viendo lo último o una copia vieja en caché.
-const BUILD_VERSION = 'Xel-Ha';
+const BUILD_VERSION = 'Holbox';
 let DATA = { prendas: [], usos: [], outfits_sugeridos: [], perfil: [], fotos_origen: [] };
 let showTrash = false;
 let soloFavoritos = false;
@@ -2366,20 +2366,26 @@ async function abrirBorrador(p){
   botonesModo.varita.onclick = ()=> elegirModo('varita');
   botonesModo.clonar.onclick = ()=> elegirModo('clonar');
   btnNuevaFuente.onclick = ()=>{ fuenteClon = null; fuenteSnap = null; clonEstado.textContent = 'Toca la parte de tela buena que quieres copiar'; };
-  // Pon el maniquí (opaco) ENCIMA del recorte en vez de debajo — así lo
-  // que sigue apareciendo alrededor del cuerpo es exactamente el
-  // sobrante (fondo mal quitado, una manga que salió más ancha de lo
-  // que le tocaba, etc.), fácil de identificar y borrar. Pedido
-  // explícito: poder elegir arriba/abajo, no que quede fijo.
+  // Pon el maniquí ENCIMA del recorte en vez de debajo, a modo de papel
+  // calca — pedido explícito: poder elegir arriba/abajo, no que quede
+  // fijo. La foto del maniquí es una foto de estudio normal (fondo
+  // blanco sólido, sin transparencia real — es JPEG) así que a opacidad
+  // completa taparía TODO el lienzo de abajo, no solo la silueta del
+  // cuerpo (probado: así se reportó, no se veía nada del sobrante).
+  // Semi-transparente sí deja ver ambas cosas a la vez: la silueta del
+  // cuerpo Y la prenda/sobrante por debajo, para comparar cuál se sale.
   let maniquiArriba = false;
   const btnManiquiArriba = document.getElementById('borradorManiquiArriba');
   const hintManiquiArriba = document.getElementById('borradorManiquiHint');
   btnManiquiArriba.onclick = ()=>{
     maniquiArriba = !maniquiArriba;
     btnManiquiArriba.classList.toggle('active', maniquiArriba);
-    wrap.querySelectorAll('.maniqui-doll-base, .maniqui-pelo').forEach(el=> el.style.zIndex = maniquiArriba ? '5' : '');
+    wrap.querySelectorAll('.maniqui-doll-base, .maniqui-pelo').forEach(el=>{
+      el.style.zIndex = maniquiArriba ? '5' : '';
+      el.style.opacity = maniquiArriba ? '0.5' : '';
+    });
     canvas.style.zIndex = maniquiArriba ? '1' : '';
-    hintManiquiArriba.textContent = maniquiArriba ? 'Lo que se ve alrededor del cuerpo es el sobrante — bórralo' : '';
+    hintManiquiArriba.textContent = maniquiArriba ? 'El cuerpo semi-transparente marca el límite — lo que se ve saliéndose es el sobrante' : '';
   };
   const escala = ()=> canvas.width / canvas.getBoundingClientRect().width;
   const posEnCanvas = e=>{
