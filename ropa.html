@@ -351,7 +351,7 @@ let SHEET_URL = '';
 // Nombre-landmark de esta versión — cámbialo en cada cambio que se
 // despliegue, así se puede saber a simple vista (en Perfil) si el
 // celular ya está viendo lo último o una copia vieja en caché.
-const BUILD_VERSION = 'Holbox';
+const BUILD_VERSION = 'Sian Kaan';
 let DATA = { prendas: [], usos: [], outfits_sugeridos: [], perfil: [], fotos_origen: [] };
 let showTrash = false;
 let soloFavoritos = false;
@@ -2291,8 +2291,15 @@ async function abrirBorrador(p){
       <button class="chip" id="modoRect">▭ Rectángulo</button>
       <button class="chip" id="modoVarita">🪄 Varita (clic y selecciona)</button>
       <button class="chip" id="modoClonar">🧵 Clonar (traer tela)</button>
+      <button class="chip" id="modoLazo">➰ Selección (forma libre)</button>
     </div>
     <p class="hint" style="text-align:center;margin-top:4px" id="clonEstado"></p>
+    <p class="hint" style="text-align:center;margin-top:4px" id="lazoEstado"></p>
+    <div class="chips" id="lazoAcciones" style="display:none;justify-content:center;margin-top:4px">
+      <button class="chip" id="lazoBorrar">✓ Borrar</button>
+      <button class="chip" id="lazoMover">🤚 Mover</button>
+      <button class="chip" id="lazoCancelar">✗ Cancelar</button>
+    </div>
     <p class="hint" style="text-align:center;margin-top:4px">📌 Con dos dedos te mueves por la imagen sin borrar nada</p>
     <div class="chips" style="justify-content:center;margin-top:6px">
       <button class="chip" id="borradorManiquiArriba" title="Pon el maniquí encima: lo que se sigue viendo alrededor es el sobrante, bórralo">🧍 Maniquí encima</button>
@@ -2345,19 +2352,32 @@ async function abrirBorrador(p){
   };
   let modo = 'libre', grosor = 12, activo = false, inicio = null, ultimo = null;
   let fuenteClon = null, fuenteSnap = null, clonInicio = null;
+  // Selección de lazo (forma libre): "dibujando" mientras se traza el
+  // contorno, "lista" cuando ya se cerró y espera ✓/🤚/✗, "moviendo"
+  // mientras se arrastra el pedazo ya levantado.
+  let lazoPuntos = [], lazoEstadoActual = null, recorteLevantado = null, moverInicio = null, moverDeltaActual = {x:0,y:0};
+  const lazoAcciones = document.getElementById('lazoAcciones');
+  const lazoEstadoTxt = document.getElementById('lazoEstado');
+  function cancelarLazo(){
+    lazoPuntos = []; lazoEstadoActual = null; recorteLevantado = null; moverInicio = null; moverDeltaActual = {x:0,y:0};
+    lazoAcciones.style.display = 'none';
+    lazoEstadoTxt.textContent = '';
+    ctx.clearRect(0,0,canvas.width,canvas.height); ctx.drawImage(buffer,0,0);
+  }
   document.getElementById('borradorZoom').oninput = e=>{ wrap.style.width = (280*Number(e.target.value)/100)+'px'; };
   document.getElementById('borradorGrosor').oninput = e=> grosor = Number(e.target.value);
-  const botonesModo = { libre: document.getElementById('modoLibre'), linea: document.getElementById('modoLinea'), ovalo: document.getElementById('modoOvalo'), rectangulo: document.getElementById('modoRect'), varita: document.getElementById('modoVarita'), clonar: document.getElementById('modoClonar') };
+  const botonesModo = { libre: document.getElementById('modoLibre'), linea: document.getElementById('modoLinea'), ovalo: document.getElementById('modoOvalo'), rectangulo: document.getElementById('modoRect'), varita: document.getElementById('modoVarita'), clonar: document.getElementById('modoClonar'), lazo: document.getElementById('modoLazo') };
   const grosorLabel = document.getElementById('borradorGrosorLabel'), grosorInput = document.getElementById('borradorGrosor');
   const clonEstado = document.getElementById('clonEstado'), btnNuevaFuente = document.getElementById('borradorNuevaFuente');
   function elegirModo(m){
     modo = m;
     Object.entries(botonesModo).forEach(([k,b])=> b.classList.toggle('active', k===m));
-    grosorLabel.style.display = m==='varita' ? 'none' : '';
-    grosorInput.style.display = m==='varita' ? 'none' : '';
+    grosorLabel.style.display = (m==='varita'||m==='lazo') ? 'none' : '';
+    grosorInput.style.display = (m==='varita'||m==='lazo') ? 'none' : '';
     fuenteClon = null; fuenteSnap = null;
     btnNuevaFuente.style.display = m==='clonar' ? '' : 'none';
     clonEstado.textContent = m==='clonar' ? 'Toca la parte de tela buena que quieres copiar' : '';
+    cancelarLazo();
   }
   botonesModo.libre.onclick = ()=> elegirModo('libre');
   botonesModo.linea.onclick = ()=> elegirModo('linea');
@@ -2365,6 +2385,7 @@ async function abrirBorrador(p){
   botonesModo.rectangulo.onclick = ()=> elegirModo('rectangulo');
   botonesModo.varita.onclick = ()=> elegirModo('varita');
   botonesModo.clonar.onclick = ()=> elegirModo('clonar');
+  botonesModo.lazo.onclick = ()=>{ elegirModo('lazo'); lazoEstadoTxt.textContent = 'Dibuja el contorno de lo que quieres seleccionar'; };
   btnNuevaFuente.onclick = ()=>{ fuenteClon = null; fuenteSnap = null; clonEstado.textContent = 'Toca la parte de tela buena que quieres copiar'; };
   // Pon el maniquí ENCIMA del recorte en vez de debajo, a modo de papel
   // calca — pedido explícito: poder elegir arriba/abajo, no que quede
@@ -2435,6 +2456,31 @@ async function abrirBorrador(p){
     c.save(); c.setLineDash([8,6]); c.strokeStyle='#ff0000'; c.lineWidth=3;
     c.beginPath(); c.moveTo(inicio.x, inicio.y); c.lineTo(ultimo.x, ultimo.y); c.stroke();
     c.restore();
+  };
+  // Selección de lazo: forma libre (no una figura fija) — se dibuja
+  // punteada mientras se traza (abierta) y cerrada cuando ya está lista
+  // para ✓/🤚/✗. El mismo path real (lazoPuntos) es lo que después usa
+  // recortarPorLazo() para un clip() EXACTO, no una caja/óvalo que la
+  // rodee.
+  const trazarPathLazo = (c)=>{
+    c.beginPath();
+    c.moveTo(lazoPuntos[0].x, lazoPuntos[0].y);
+    for(let i=1;i<lazoPuntos.length;i++) c.lineTo(lazoPuntos[i].x, lazoPuntos[i].y);
+  };
+  const dibujarLazoPreview = (cerrado)=>{
+    if(lazoPuntos.length<2) return;
+    ctx.save(); ctx.setLineDash([8,6]); ctx.strokeStyle='#ff0000'; ctx.lineWidth=3;
+    trazarPathLazo(ctx);
+    if(cerrado) ctx.closePath();
+    ctx.stroke();
+    ctx.restore();
+  };
+  // Recorta un contexto por la forma exacta del lazo — mismo truco para
+  // "✓ Borrar" (clearRect después) y para "levantar" el pedazo al mover
+  // (drawImage después), solo cambia qué se hace después del clip().
+  const recortarPorLazo = (c)=>{
+    c.save();
+    trazarPathLazo(c); c.closePath(); c.clip();
   };
   // "Varita": como el bote de pintura de Paint pero para borrar — un clic
   // selecciona toda la región conectada de color parecido (ej. una manga
@@ -2511,6 +2557,21 @@ async function abrirBorrador(p){
       clonEstado.textContent = 'Listo — ahora arrastra donde falta tela';
       return;
     }
+    if(modo==='lazo'){
+      if(lazoEstadoActual==='moviendo'){
+        activo = true;
+        moverInicio = pos;
+        return;
+      }
+      // Empieza un contorno nuevo — si ya había uno "listo" sin decidir,
+      // se reemplaza por este (más simple que obligar a tocar ✗ primero).
+      lazoPuntos = [pos];
+      lazoEstadoActual = 'dibujando';
+      lazoAcciones.style.display = 'none';
+      lazoEstadoTxt.textContent = 'Dibuja el contorno de lo que quieres seleccionar';
+      activo = true;
+      return;
+    }
     activo = true;
     inicio = pos; ultimo = pos;
     guardarHistorial();
@@ -2551,6 +2612,14 @@ async function abrirBorrador(p){
       clonarLinea(ultimo, pos, grosor*escala());
       ultimo = pos;
       ctx.clearRect(0,0,canvas.width,canvas.height); ctx.drawImage(buffer,0,0);
+    } else if(modo==='lazo' && lazoEstadoActual==='dibujando'){
+      lazoPuntos.push(pos);
+      ctx.clearRect(0,0,canvas.width,canvas.height); ctx.drawImage(buffer,0,0);
+      dibujarLazoPreview(false);
+    } else if(modo==='lazo' && lazoEstadoActual==='moviendo' && moverInicio){
+      moverDeltaActual = { x: pos.x-moverInicio.x, y: pos.y-moverInicio.y };
+      ctx.clearRect(0,0,canvas.width,canvas.height); ctx.drawImage(buffer,0,0);
+      ctx.drawImage(recorteLevantado, moverDeltaActual.x, moverDeltaActual.y);
     }
   });
   const soltarPuntero = e=>{
@@ -2558,19 +2627,69 @@ async function abrirBorrador(p){
     if(punteros.size<2) panActivo = null;
     if(!activo) return;
     activo = false;
+    if(modo==='lazo' && lazoEstadoActual==='dibujando'){
+      if(lazoPuntos.length>=3){
+        lazoEstadoActual = 'lista';
+        dibujarLazoPreview(true);
+        lazoAcciones.style.display = '';
+        lazoEstadoTxt.textContent = '¿Qué quieres hacer con la selección?';
+      } else {
+        cancelarLazo();
+      }
+      return;
+    }
+    if(modo==='lazo' && lazoEstadoActual==='moviendo'){
+      bctx.drawImage(recorteLevantado, moverDeltaActual.x, moverDeltaActual.y);
+      recorteLevantado = null; lazoEstadoActual = null; moverInicio = null; moverDeltaActual = {x:0,y:0};
+      lazoEstadoTxt.textContent = '';
+      ctx.clearRect(0,0,canvas.width,canvas.height); ctx.drawImage(buffer,0,0);
+      return;
+    }
     if(modo==='ovalo' || modo==='rectangulo') dibujarFigura(bctx, false);
     if(modo==='linea') borrarLinea(bctx, inicio, ultimo, grosor*escala());
     ctx.clearRect(0,0,canvas.width,canvas.height); ctx.drawImage(buffer,0,0);
   };
   canvas.addEventListener('pointerup', soltarPuntero);
   canvas.addEventListener('pointercancel', soltarPuntero);
+  document.getElementById('lazoCancelar').onclick = ()=> cancelarLazo();
+  document.getElementById('lazoBorrar').onclick = ()=>{
+    if(lazoPuntos.length<3) return;
+    guardarHistorial();
+    recortarPorLazo(bctx);
+    bctx.clearRect(0,0,buffer.width,buffer.height);
+    bctx.restore();
+    cancelarLazo();
+  };
+  document.getElementById('lazoMover').onclick = ()=>{
+    if(lazoPuntos.length<3) return;
+    guardarHistorial();
+    // Levanta el pedazo a un canvas aparte (mismo tamaño que el lienzo,
+    // solo con esos píxeles, el resto transparente) y deja el hueco
+    // transparente en el original — para que "mover" mueva de verdad
+    // en vez de duplicar.
+    recorteLevantado = document.createElement('canvas');
+    recorteLevantado.width = buffer.width; recorteLevantado.height = buffer.height;
+    const rctx = recorteLevantado.getContext('2d');
+    recortarPorLazo(rctx);
+    rctx.drawImage(buffer, 0, 0);
+    rctx.restore();
+    recortarPorLazo(bctx);
+    bctx.clearRect(0,0,buffer.width,buffer.height);
+    bctx.restore();
+    lazoPuntos = []; lazoEstadoActual = 'moviendo'; moverDeltaActual = {x:0,y:0};
+    lazoAcciones.style.display = 'none';
+    lazoEstadoTxt.textContent = 'Arrastra el pedazo levantado y suelta para soltarlo';
+    ctx.clearRect(0,0,canvas.width,canvas.height); ctx.drawImage(buffer,0,0); ctx.drawImage(recorteLevantado,0,0);
+  };
   document.getElementById('borradorDeshacer').onclick = ()=>{
     if(!historial.length) return;
+    cancelarLazo();
     bctx.putImageData(historial.pop(), 0, 0);
     ctx.clearRect(0,0,canvas.width,canvas.height); ctx.drawImage(buffer,0,0);
   };
   document.getElementById('borradorReiniciar').onclick = ()=>{
     historial = [];
+    cancelarLazo();
     bctx.clearRect(0,0,canvas.width,canvas.height); bctx.drawImage(img,0,0);
     ctx.clearRect(0,0,canvas.width,canvas.height); ctx.drawImage(buffer,0,0);
   };
