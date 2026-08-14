@@ -351,7 +351,7 @@ let SHEET_URL = '';
 // Nombre-landmark de esta versión — cámbialo en cada cambio que se
 // despliegue, así se puede saber a simple vista (en Perfil) si el
 // celular ya está viendo lo último o una copia vieja en caché.
-const BUILD_VERSION = 'Zacatecas 2';
+const BUILD_VERSION = 'Campeche 2';
 let DATA = { prendas: [], usos: [], outfits_sugeridos: [], perfil: [], fotos_origen: [] };
 let showTrash = false;
 let soloFavoritos = false;
@@ -3846,18 +3846,27 @@ async function renderCalendario(){
     }
     const fechaVal = u.Fecha && !isNaN(new Date(u.Fecha).getTime()) ? new Date(u.Fecha).toISOString().slice(0,10) : '';
     const meta = [u.Evento, u.ClimaTexto].filter(Boolean).join(' · ');
+    // Chica por defecto (foto + maniquí + fecha nada más) para poder ver
+    // varios días de un jalón y notar si se repite un outfit — las
+    // prendas y los botones de editar/eliminar solo aparecen al abrir
+    // "Ver prendas y editar" (<details>, sin JS extra, mismo patrón que
+    // las secciones plegables de Perfil).
     return `<div class="card" style="margin-bottom:12px">
       ${miniaturas}
-      <div class="body">
-        <div class="field" style="margin:0"><label class="hint">Fecha</label><input type="date" value="${fechaVal}" onchange="guardarFechaUso('${u.ID}', this.value)"></div>
+      <div class="body" style="padding-bottom:4px">
+        <div class="tipo">${formatoFechaUso(u.Fecha)}</div>
         ${meta?`<div class="meta">${escAttr(meta)}</div>`:''}
+      </div>
+      <details style="padding:0 10px 10px">
+        <summary class="hint" style="cursor:pointer">Ver prendas y editar</summary>
+        <div class="field" style="margin-top:8px"><label class="hint">Fecha</label><input type="date" value="${fechaVal}" onchange="guardarFechaUso('${u.ID}', this.value)"></div>
         <div class="pick-list" style="margin-top:8px;flex-wrap:wrap">${prendas.length?prendas.map(p=>`<div class="pick-item" onclick="abrirVerPrenda('${p.ID}')">${fotoRecortadaHtml(p,{estilo:'width:56px',clickable:false,iconoTam:20})}<div>${escAttr(p.Tipo||p.Categoria)}</div></div>`).join(''):'<p class="hint">Esas prendas ya no están en tu catálogo.</p>'}</div>
         <div style="display:flex;gap:6px;margin-top:6px;flex-wrap:wrap">
           <button class="btn ghost" style="font-size:12px;padding:6px 10px" onclick="agregarFotoDia('${u.ID}')">📷 +Foto</button>
           <button class="btn ghost" style="font-size:12px;padding:6px 10px" onclick="editarPrendasDeUso('${u.ID}')">✏️ Editar prendas</button>
           <button class="remove" onclick="pedirEliminarUso('${u.ID}')" title="Eliminar este día">🗑</button>
         </div>
-      </div>
+      </details>
     </div>`;
   }).join('');
 }
