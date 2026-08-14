@@ -351,7 +351,7 @@ let SHEET_URL = '';
 // Nombre-landmark de esta versión — cámbialo en cada cambio que se
 // despliegue, así se puede saber a simple vista (en Perfil) si el
 // celular ya está viendo lo último o una copia vieja en caché.
-const BUILD_VERSION = 'Cenote Azul';
+const BUILD_VERSION = 'Isla Contoy';
 let DATA = { prendas: [], usos: [], outfits_sugeridos: [], perfil: [], fotos_origen: [] };
 let showTrash = false;
 let soloFavoritos = false;
@@ -2273,7 +2273,7 @@ async function abrirBorrador(p){
   if(!fileId){ showToast('No se pudo identificar la foto generada'); return; }
   showToast('Cargando foto…');
   const genero = localStorage.getItem('ropa_maniqui_genero')||'mujer';
-  const [r, maniquiInfo] = await Promise.all([ apiPost('descargarImagenDrive', { fileId }), maniquiConPeinadoHtml(genero) ]);
+  const [r, maniquiInfo] = await Promise.all([ apiPost('descargarImagenDrive', { fileId }), maniquiConPeinadoHtml(genero, p.ID) ]);
   if(!r.ok){ showToast('No se pudo cargar la foto: '+(r.error||'sin conexión')); return; }
   const img = new Image();
   const cargada = new Promise((resolve,reject)=>{ img.onload=resolve; img.onerror=reject; });
@@ -2913,7 +2913,7 @@ async function abrirAjustarManiqui(p){
   overlay.addEventListener('click', e=>{ if(e.target===overlay){ overlay.remove(); ajusteManiqui=null; } });
   overlay.querySelector('#ajustarCancelar').onclick = ()=>{ overlay.remove(); ajusteManiqui=null; };
   overlay.querySelector('#ajustarGuardar').onclick = guardarAjusteManiqui;
-  const maniquiInfo = await maniquiConPeinadoHtml(genero);
+  const maniquiInfo = await maniquiConPeinadoHtml(genero, p.ID);
   const wrap = document.getElementById('ajustarWrap');
   if(!wrap) return; // el usuario ya cerró el modal mientras cargaba
   if(!maniquiInfo.cuerpo){ wrap.innerHTML = '<p class="hint">No se pudo cargar el maniquí.</p>'; return; }
@@ -3659,11 +3659,18 @@ async function obtenerManiquiBase(genero, estatura){
 // generarCabelloConIA) — "ropa_maniqui_peinado" guarda su ID (o 'ninguno'),
 // y su FotoGeneradaURL ya viene recortada y posicionada desde que se creó,
 // así que esto es solo un <img>, sin llamadas IA ni chroma-key en vivo.
-async function maniquiConPeinadoHtml(genero){
+// "excluirId" (opcional): cuando se muestra el maniquí de REFERENCIA
+// detrás de un editor (Borrador, Ajustar) para la MISMA prenda que ya
+// es el cabello predeterminado, no hay que dibujar esa prenda otra vez
+// como capa de fondo — si no, se ve "duplicada" y, peor, al borrar algo
+// del lienzo editable queda transparente y deja ver la MISMA peluca sin
+// editar justo detrás, en la misma posición — parece que el borrador no
+// hizo nada, aunque sí borró (reportado en vivo: "de plano no pasa nada").
+async function maniquiConPeinadoHtml(genero, excluirId){
   const cuerpo = await obtenerManiquiBase(genero);
   if(!cuerpo || !cuerpo.url) return { html:'', cuerpo:null };
   const peinadoId = localStorage.getItem('ropa_maniqui_peinado')||'ninguno';
-  const prendaCabello = peinadoId!=='ninguno' ? findPrenda(peinadoId) : null;
+  const prendaCabello = peinadoId!=='ninguno' && peinadoId!==excluirId ? findPrenda(peinadoId) : null;
   // Si esa prenda se movió a la papelera (eliminada desde cualquier
   // lugar), se trata como si no hubiera predeterminado en vez de seguir
   // mostrando algo ya borrado.
