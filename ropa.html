@@ -351,7 +351,7 @@ let SHEET_URL = '';
 // Nombre-landmark de esta versión — cámbialo en cada cambio que se
 // despliegue, así se puede saber a simple vista (en Perfil) si el
 // celular ya está viendo lo último o una copia vieja en caché.
-const BUILD_VERSION = 'Isla Mujeres';
+const BUILD_VERSION = 'Bacalar 2';
 let DATA = { prendas: [], usos: [], outfits_sugeridos: [], perfil: [], fotos_origen: [] };
 let showTrash = false;
 let soloFavoritos = false;
@@ -696,7 +696,7 @@ async function guardarPrendaManualDesdeFoto(recortada){
   const subOrigen = await apiPost('uploadImage', { imageBase64: recortada.base64, mimeType: recortada.mimeType, fileName:'manual-origen-'+Date.now()+'.jpg' });
   const origenUrl = subOrigen.ok ? subOrigen.url : '';
   if(origenUrl) await registrarFotoOrigenSiFalta(origenUrl);
-  const row = await crearPrendaSinIA(categoria, tipo, recortada.dataUrl, origenUrl);
+  const row = await crearPrendaSinIA({ categoria, tipo, cropPreview: recortada.dataUrl }, origenUrl);
   await apiPost('saveRow', { table:'PRENDAS', row });
   DATA.prendas.push(row);
   const r = await apiPost('registrarUso', { prendaIds:[row.ID], fotoUrl: origenUrl });
@@ -940,6 +940,10 @@ function renderRevisionFoto(){
         </div>
         <button class="remove" onclick="quitarDeteccion(${i})" title="No incluir esta prenda">✕</button>
       </div>
+      <label class="hint" style="display:flex;gap:8px;align-items:center;margin-top:6px;cursor:pointer">
+        <input type="checkbox" ${it.sinIA?'checked':''} onchange="currentDetections.items[${i}].sinIA=this.checked" style="width:auto">
+        🖐️ Guardar sin IA — uso la categoría/nombre de arriba tal cual, yo la ajusto y le quito el fondo después
+      </label>
       ${estadoMatchHtml}
       <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:6px">
         <button class="btn ghost" style="font-size:12px;padding:6px 10px" onclick="abrirRevisarCategoriaSubir(${i})">🔍 ${prendaConfirmada?'Cambiar':'Revisar'} catálogo de ${escAttr(it.categoria)} (${candidatos.length})</button>
@@ -1572,17 +1576,23 @@ async function crearFilaPrenda(it, origenUrl){
 // no quiere que la app la vuelva a interpretar/regenerar — queda opaca
 // (con su fondo real), lista para que ella misma le quite el fondo con
 // "🧽 Borrador".
-async function crearPrendaSinIA(categoria, tipo, cropPreviewDataUrl, origenUrl){
-  const medido = await bboxDeCapaUrl(cropPreviewDataUrl);
+// Mismo "contrato" que crearFilaPrenda(it, origenUrl) — recibe el mismo
+// objeto `it` (categoria/tipo/color/colorSecundario/estampado/
+// cropPreview ya vienen ahí, sea de la detección por IA o de un picker
+// manual) para poder usarse donde sea intercambiable con crearFilaPrenda
+// según si esa prenda en particular se quiere "sin IA" o no — sin tener
+// que volver a escribir los mismos campos aparte.
+async function crearPrendaSinIA(it, origenUrl){
+  const medido = it.cropPreview ? await bboxDeCapaUrl(it.cropPreview) : null;
   let fotoGeneradaUrl = '', bboxJson = '';
   if(medido){
-    const reposicionada = await reposicionarCapa(medido.dataUrl, medido.bbox, categoria, tipo);
+    const reposicionada = await reposicionarCapa(medido.dataUrl, medido.bbox, it.categoria, it.tipo);
     const final = reposicionada || { dataUrl: medido.dataUrl, base64: medido.dataUrl.split(',')[1], bboxPct: medido.bbox };
     const subida = await apiPost('uploadImage', { imageBase64: final.base64, mimeType:'image/png', fileName:'manual-capa-'+Date.now()+'.png' });
     if(subida.ok){ fotoGeneradaUrl = subida.url; bboxJson = JSON.stringify(final.bboxPct); }
   }
   return {
-    ID: uid(), Categoria: categoria||'Ropa superior', Tipo: tipo||'', Color:'', ColorSecundario:'', Estampado:'', Marca:'', Temporada:'',
+    ID: uid(), Categoria: it.categoria||'Ropa superior', Tipo: it.tipo||'', Color: it.color||'', ColorSecundario: it.colorSecundario||'', Estampado: it.estampado||'', Marca:'', Temporada:'',
     Formalidad:'', FotoURL: fotoGeneradaUrl||origenUrl||'', FotoGeneradaURL: fotoGeneradaUrl, BBoxJSON: bboxJson, ClaveColor:'', FotoRealURL: origenUrl||'', FotoOrigenURL: origenUrl||'', FotoManiquiURL:'', FechaAlta: new Date().toISOString(),
     UltimoUso:'', VecesUsado:0, Favorito:false, Notas:'', Papelera:false
   };
@@ -1612,8 +1622,8 @@ async function guardarDetecciones(){
   for(let i=0;i<d.items.length;i++){
     const it = d.items[i];
     if(it.matchId){ todosLosIds.push(it.matchId); continue; }
-    if(btn) btn.textContent = `Generando prenda ${i+1}/${d.items.length}…`;
-    const row = await crearFilaPrenda(it, origenUrl);
+    if(btn) btn.textContent = it.sinIA ? `Guardando prenda ${i+1}/${d.items.length}…` : `Generando prenda ${i+1}/${d.items.length}…`;
+    const row = it.sinIA ? await crearPrendaSinIA(it, origenUrl) : await crearFilaPrenda(it, origenUrl);
     await apiPost('saveRow', { table:'PRENDAS', row });
     DATA.prendas.push(row);
     todosLosIds.push(row.ID);
@@ -4492,7 +4502,7 @@ async function guardarEstiloCabelloDeFoto(recortada){
   showToast('Creando estilo de cabello…');
   const subOrigen = await apiPost('uploadImage', { imageBase64: recortada.base64, mimeType: recortada.mimeType, fileName:'cabello-origen-'+Date.now()+'.jpg' });
   const origenUrl = subOrigen.ok ? subOrigen.url : '';
-  const row = await crearPrendaSinIA('Cabello', 'Cabello (foto)', recortada.dataUrl, origenUrl);
+  const row = await crearPrendaSinIA({ categoria:'Cabello', tipo:'Cabello (foto)', cropPreview: recortada.dataUrl }, origenUrl);
   await apiPost('saveRow', { table:'PRENDAS', row });
   DATA.prendas.push(row);
   localStorage.setItem('ropa_data_cache', JSON.stringify(DATA));
