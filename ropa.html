@@ -351,7 +351,7 @@ let SHEET_URL = '';
 // Nombre-landmark de esta versión — cámbialo en cada cambio que se
 // despliegue, así se puede saber a simple vista (en Perfil) si el
 // celular ya está viendo lo último o una copia vieja en caché.
-const BUILD_VERSION = 'Isla Contoy';
+const BUILD_VERSION = 'Isla Mujeres';
 let DATA = { prendas: [], usos: [], outfits_sugeridos: [], perfil: [], fotos_origen: [] };
 let showTrash = false;
 let soloFavoritos = false;
@@ -2760,8 +2760,7 @@ async function abrirBorrador(p){
     await apiPost('saveRow', { table:'PRENDAS', row:p });
     localStorage.setItem('ropa_data_cache', JSON.stringify(DATA));
     renderCatalogo();
-    const vestidorCont = document.getElementById('vestidorPreview');
-    if(vestidorCont){ const base = vestidorCont.querySelector('.maniqui-doll-base'); const pelo = vestidorCont.querySelector('.maniqui-pelo'); vestidorCont.innerHTML = (base?base.outerHTML:'') + (pelo?pelo.outerHTML:'') + capasHtml(); }
+    refrescarVestidorDOM();
     renderCapasLista();
     overlay.remove();
     refrescarFotoModal(p);
@@ -2801,8 +2800,7 @@ async function aplicarCapaCandidata(p, candidata){
   await apiPost('saveRow', { table:'PRENDAS', row:p });
   localStorage.setItem('ropa_data_cache', JSON.stringify(DATA));
   renderCatalogo();
-  const vestidorCont = document.getElementById('vestidorPreview');
-  if(vestidorCont){ const base = vestidorCont.querySelector('.maniqui-doll-base'); const pelo = vestidorCont.querySelector('.maniqui-pelo'); vestidorCont.innerHTML = (base?base.outerHTML:'') + (pelo?pelo.outerHTML:'') + capasHtml(); }
+  refrescarVestidorDOM();
   renderCapasLista();
 }
 // Compartido por "🔄 Regenerar" y por recortar-y-regenerar (confirmarRecorteEdicion)
@@ -2864,8 +2862,7 @@ function abrirAccionesPrenda(p){
       if(!ok){ showToast('No se pudo aplicar el molde (revisa la conexión)'); return; }
       localStorage.setItem('ropa_data_cache', JSON.stringify(DATA));
       renderCatalogo();
-      const vestidorCont = document.getElementById('vestidorPreview');
-      if(vestidorCont){ const base = vestidorCont.querySelector('.maniqui-doll-base'); const pelo = vestidorCont.querySelector('.maniqui-pelo'); vestidorCont.innerHTML = (base?base.outerHTML:'') + (pelo?pelo.outerHTML:'') + capasHtml(); }
+      refrescarVestidorDOM();
       renderCapasLista();
       showToast('Puesta en el molde de "'+moldeBase(clave).nombre+'"');
     };
@@ -3010,8 +3007,7 @@ async function guardarAjusteManiqui(){
   localStorage.setItem('ropa_data_cache', JSON.stringify(DATA));
   renderCatalogo();
   refrescarFotoModal(p);
-  const vestidorCont = document.getElementById('vestidorPreview');
-  if(vestidorCont){ const base = vestidorCont.querySelector('.maniqui-doll-base'); const pelo = vestidorCont.querySelector('.maniqui-pelo'); vestidorCont.innerHTML = (base?base.outerHTML:'') + (pelo?pelo.outerHTML:'') + capasHtml(); }
+  refrescarVestidorDOM();
   renderCapasLista();
   const overlay = document.getElementById('ajustarManiquiOverlay');
   if(overlay) overlay.remove();
@@ -3321,7 +3317,7 @@ function abrirVestidor(){
       const items = itemsPorCategoria(cat);
       if(items.length) inicial.push(items[0].ID);
     });
-    outfitBoard = { capas: inicial };
+    outfitBoard = { capas: inicial, peloIndice: 0 };
   } else {
     outfitBoard.capas = outfitBoard.capas.filter(id=>findPrenda(id)||esNinguno(id));
   }
@@ -3336,6 +3332,10 @@ function renderTableroOutfit(){
       ${hayEstilosCabello ? `<button class="maniqui-arrow left" style="top:8%" onclick="cambiarCabelloCarrusel(-1)" title="Estilo de cabello anterior">‹</button>
       <button class="maniqui-arrow right" style="top:8%" onclick="cambiarCabelloCarrusel(1)" title="Siguiente estilo de cabello">›</button>` : ''}
     </div>
+    ${hayEstilosCabello ? `<div class="chips" style="justify-content:center;margin-top:6px">
+      <button class="chip" onclick="moverPeloOutfit(-1)" title="Que el cabello quede debajo de más prendas">👇 Cabello más abajo</button>
+      <button class="chip" onclick="moverPeloOutfit(1)" title="Que el cabello quede encima de más prendas (ej. sobre una capucha)">👆 Cabello más arriba</button>
+    </div>` : ''}
     <div id="capasListaOutfit" style="margin-top:10px"></div>
     <button class="btn secondary" style="margin-top:8px" onclick="abrirAgregarCapa()">➕ Agregar prenda</button>
     <p class="hint" style="text-align:center;margin-top:10px" id="resumenOutfit"></p>
@@ -3367,7 +3367,12 @@ async function renderVestidorPreview(){
     cont.innerHTML = '<p class="hint" style="padding:40px 0;text-align:center">No se pudo cargar el maniquí.</p>';
     return;
   }
-  cont.innerHTML = maniquiInfo.html + capasHtml();
+  {
+    const arr = capasArray();
+    const idx = Math.max(0, Math.min(arr.length, outfitBoard.peloIndice||0));
+    if(maniquiInfo.peloHtml) arr.splice(idx, 0, maniquiInfo.peloHtml);
+    cont.innerHTML = maniquiInfo.baseHtml + arr.join('');
+  }
 }
 // El maniquí SOLO recibe FotoGeneradaURL (la capa transparente real,
 // alineada al lienzo canónico) — nunca FotoURL como respaldo: FotoURL
@@ -3407,7 +3412,11 @@ function filasFlechas(ids){
   orden.forEach(o=>{ res[o.i] = Math.min(94, Math.max(6, o.v - exceso)); });
   return res;
 }
-function capasHtml(){
+// Arreglo (no string) — un HTML por capa, en orden. capasHtml() sigue
+// regresando el mismo string de siempre (join de esto); capasArray()
+// se usa donde hace falta INTERCALAR algo más entre las capas (el
+// cabello, ver refrescarVestidorDOM) en vez de solo pegarlo antes/después.
+function capasArray(){
   const filas = filasFlechas(outfitBoard.capas);
   return outfitBoard.capas.map((id, i)=>{
     if(esNinguno(id)){
@@ -3431,7 +3440,24 @@ function capasHtml(){
         `<button class="maniqui-arrow right" style="top:${topPct}%" onclick="cambiarPrendaCarrusel('${p.ID}',1)" title="Siguiente prenda de ${escAttr(p.Categoria)}">›</button>`;
     }
     return `<img class="maniqui-doll-capa-full" src="${p.FotoGeneradaURL}" onclick="verFotoGrande('${p.FotoGeneradaURL}')">${flechas}`;
-  }).join('');
+  });
+}
+function capasHtml(){ return capasArray().join(''); }
+// Reconstruye #vestidorPreview reusando el cuerpo/cabello YA en el DOM
+// (sin volver a pedirlos) + las capas actuales — intercala el cabello
+// en outfitBoard.peloIndice en vez de siempre pegarlo antes de todo,
+// para que "👆/👇 Cabello más arriba/abajo" (moverPeloOutfit) se vea
+// reflejado. Reemplaza el patrón que antes se repetía suelto en cada
+// función que cambia las capas (mover/quitar/agregar/carrusel/ajustar).
+function refrescarVestidorDOM(){
+  const cont = document.getElementById('vestidorPreview');
+  if(!cont) return;
+  const base = cont.querySelector('.maniqui-doll-base');
+  const pelo = cont.querySelector('.maniqui-pelo');
+  const arr = capasArray();
+  const idx = Math.max(0, Math.min(arr.length, outfitBoard.peloIndice||0));
+  if(pelo) arr.splice(idx, 0, pelo.outerHTML);
+  cont.innerHTML = (base?base.outerHTML:'') + arr.join('');
 }
 function renderCapasLista(){
   const cont = document.getElementById('capasListaOutfit');
@@ -3477,8 +3503,7 @@ function cambiarPrendaCarrusel(idActual, direccion){
   const capaIdx = outfitBoard.capas.indexOf(idActual);
   if(capaIdx<0) return;
   outfitBoard.capas[capaIdx] = opciones[nuevoIdx];
-  const cont = document.getElementById('vestidorPreview');
-  if(cont){ const base = cont.querySelector('.maniqui-doll-base'); const pelo = cont.querySelector('.maniqui-pelo'); cont.innerHTML = (base?base.outerHTML:'') + (pelo?pelo.outerHTML:'') + capasHtml(); }
+  refrescarVestidorDOM();
   renderCapasLista();
   actualizarResumenOutfit();
 }
@@ -3495,20 +3520,28 @@ async function cambiarCabelloCarrusel(direccion){
   idx = (idx + direccion + opciones.length) % opciones.length;
   await elegirPeinadoManiqui(opciones[idx]);
 }
+// A qué ALTURA de la pila de capas queda el cabello — independiente de
+// CUÁL cabello es (eso lo decide cambiarCabelloCarrusel arriba). 0 =
+// justo encima del cuerpo, como siempre; outfitBoard.capas.length =
+// hasta arriba de todo (ej. encima de una capucha). Vive solo en esta
+// sesión del Vestidor, no se guarda con el outfit.
+function moverPeloOutfit(delta){
+  const max = outfitBoard.capas.length;
+  outfitBoard.peloIndice = Math.max(0, Math.min(max, (outfitBoard.peloIndice||0) + delta));
+  refrescarVestidorDOM();
+}
 function moverCapaOutfit(id, delta){
   const idx = outfitBoard.capas.indexOf(id);
   if(idx<0) return;
   const nuevo = idx+delta;
   if(nuevo<0 || nuevo>=outfitBoard.capas.length) return;
   [outfitBoard.capas[idx], outfitBoard.capas[nuevo]] = [outfitBoard.capas[nuevo], outfitBoard.capas[idx]];
-  const cont = document.getElementById('vestidorPreview');
-  if(cont){ const base = cont.querySelector('.maniqui-doll-base'); const pelo = cont.querySelector('.maniqui-pelo'); cont.innerHTML = (base?base.outerHTML:'') + (pelo?pelo.outerHTML:'') + capasHtml(); }
+  refrescarVestidorDOM();
   renderCapasLista();
 }
 function quitarCapaOutfit(id){
   outfitBoard.capas = outfitBoard.capas.filter(x=>x!==id);
-  const cont = document.getElementById('vestidorPreview');
-  if(cont){ const base = cont.querySelector('.maniqui-doll-base'); const pelo = cont.querySelector('.maniqui-pelo'); cont.innerHTML = (base?base.outerHTML:'') + (pelo?pelo.outerHTML:'') + capasHtml(); }
+  refrescarVestidorDOM();
   renderCapasLista();
   actualizarResumenOutfit();
 }
@@ -3524,8 +3557,7 @@ function agregarCapaOutfit(id){
     else outfitBoard.capas.push(id);
   }
   else outfitBoard.capas = outfitBoard.capas.filter(x=>x!==id);
-  const cont = document.getElementById('vestidorPreview');
-  if(cont){ const base = cont.querySelector('.maniqui-doll-base'); const pelo = cont.querySelector('.maniqui-pelo'); cont.innerHTML = (base?base.outerHTML:'') + (pelo?pelo.outerHTML:'') + capasHtml(); }
+  refrescarVestidorDOM();
   renderCapasLista();
   actualizarResumenOutfit();
 }
@@ -3678,8 +3710,13 @@ async function maniquiConPeinadoHtml(genero, excluirId){
   // "maniqui-pelo" además de la clase visual — así se puede distinguir
   // del resto de las capas (prendas reales) cuando se reusa el HTML ya
   // renderizado sin volver a pedirlo (ver los querySelector('.maniqui-pelo')).
-  const html = `<img class="maniqui-doll-base" src="${cuerpo.url}">` + (pelo ? `<img class="maniqui-doll-capa-full maniqui-pelo" src="${pelo}">` : '');
-  return { html, cuerpo };
+  const baseHtml = `<img class="maniqui-doll-base" src="${cuerpo.url}">`;
+  const peloHtml = pelo ? `<img class="maniqui-doll-capa-full maniqui-pelo" src="${pelo}">` : '';
+  // baseHtml/peloHtml por separado además del combinado "html" de
+  // siempre — el Vestidor los necesita aparte para poder intercalar el
+  // cabello EN CUALQUIER posición de la pila de capas (ver
+  // refrescarVestidorDOM), no siempre pegado antes de todo.
+  return { html: baseHtml+peloHtml, cuerpo, baseHtml, peloHtml };
 }
 async function base64DeFotoURL(url){
   const fileId = fileIdDeUrlDrive(url);
@@ -4718,7 +4755,12 @@ async function refrescarVestidorManiqui(){
   if(!cont) return;
   const genero = localStorage.getItem('ropa_maniqui_genero')||'mujer';
   const maniquiInfo = await maniquiConPeinadoHtml(genero);
-  cont.innerHTML = maniquiInfo.html + capasHtml();
+  {
+    const arr = capasArray();
+    const idx = Math.max(0, Math.min(arr.length, outfitBoard.peloIndice||0));
+    if(maniquiInfo.peloHtml) arr.splice(idx, 0, maniquiInfo.peloHtml);
+    cont.innerHTML = maniquiInfo.baseHtml + arr.join('');
+  }
 }
 // El género elegido aquí decide qué maniquí base se usa en todo el
 // Vestidor (Ideas y, si hace falta regenerarlo, el armador). Se deja
