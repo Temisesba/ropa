@@ -351,7 +351,7 @@ let SHEET_URL = '';
 // Nombre-landmark de esta versión — cámbialo en cada cambio que se
 // despliegue, así se puede saber a simple vista (en Perfil) si el
 // celular ya está viendo lo último o una copia vieja en caché.
-const BUILD_VERSION = 'Bacalar 2';
+const BUILD_VERSION = 'Merida 2';
 let DATA = { prendas: [], usos: [], outfits_sugeridos: [], perfil: [], fotos_origen: [] };
 let showTrash = false;
 let soloFavoritos = false;
@@ -2419,6 +2419,27 @@ async function abrirBorrador(p){
     canvas.style.zIndex = maniquiArriba ? '1' : '';
     hintManiquiArriba.textContent = maniquiArriba ? 'El cuerpo semi-transparente marca el límite — lo que se ve saliéndose es el sobrante' : '';
   };
+  // El redibujo completo del lienzo (clearRect+drawImage de un canvas de
+  // 720x1280) es caro — hacerlo una vez por cada evento pointermove (que
+  // en algunos celulares dispara más rápido que la pantalla puede
+  // refrescar) hacía que el trazo se sintiera atrasado del dedo: seguía
+  // arrastrando sin ver el borrado todavía, y terminaba borrando de más
+  // por desconfiar de que ya había pasado. Con requestAnimationFrame se
+  // agrupan varios eventos en un solo redibujo por cuadro — el dedo
+  // sigue registrando cada movimiento (nada se pierde), solo la pantalla
+  // se actualiza como máximo a la velocidad real de refresco.
+  let redibujoPendiente = false, dibujarExtra = null;
+  function pedirRedibujo(extra){
+    dibujarExtra = extra || null;
+    if(redibujoPendiente) return;
+    redibujoPendiente = true;
+    requestAnimationFrame(()=>{
+      redibujoPendiente = false;
+      ctx.clearRect(0,0,canvas.width,canvas.height);
+      ctx.drawImage(buffer,0,0);
+      if(dibujarExtra) dibujarExtra();
+    });
+  }
   const escala = ()=> canvas.width / canvas.getBoundingClientRect().width;
   const posEnCanvas = e=>{
     const rect = canvas.getBoundingClientRect();
@@ -2650,28 +2671,24 @@ async function abrirBorrador(p){
     const pos = posEnCanvas(e);
     if(modo==='ovalo' || modo==='rectangulo'){
       ultimo = pos;
-      ctx.clearRect(0,0,canvas.width,canvas.height); ctx.drawImage(buffer,0,0);
-      dibujarFigura(ctx, true);
+      pedirRedibujo(()=> dibujarFigura(ctx, true));
     } else if(modo==='linea'){
       ultimo = pos;
-      ctx.clearRect(0,0,canvas.width,canvas.height); ctx.drawImage(buffer,0,0);
-      dibujarLineaPreview(ctx);
+      pedirRedibujo(()=> dibujarLineaPreview(ctx));
     } else if(modo==='libre'){
       borrarLinea(bctx, ultimo, pos, grosor*escala());
       ultimo = pos;
-      ctx.clearRect(0,0,canvas.width,canvas.height); ctx.drawImage(buffer,0,0);
+      pedirRedibujo();
     } else if(modo==='clonar'){
       clonarLinea(ultimo, pos, grosor*escala());
       ultimo = pos;
-      ctx.clearRect(0,0,canvas.width,canvas.height); ctx.drawImage(buffer,0,0);
+      pedirRedibujo();
     } else if(modo==='lazo' && lazoEstadoActual==='dibujando'){
       lazoPuntos.push(pos);
-      ctx.clearRect(0,0,canvas.width,canvas.height); ctx.drawImage(buffer,0,0);
-      dibujarLazoPreview(false);
+      pedirRedibujo(()=> dibujarLazoPreview(false));
     } else if(modo==='lazo' && lazoEstadoActual==='moviendo' && moverInicio){
       moverDeltaActual = { x: pos.x-moverInicio.x, y: pos.y-moverInicio.y };
-      ctx.clearRect(0,0,canvas.width,canvas.height); ctx.drawImage(buffer,0,0);
-      ctx.drawImage(recorteLevantado, moverDeltaActual.x, moverDeltaActual.y);
+      pedirRedibujo(()=> ctx.drawImage(recorteLevantado, moverDeltaActual.x, moverDeltaActual.y));
     }
   });
   const soltarPuntero = e=>{
@@ -2679,6 +2696,10 @@ async function abrirBorrador(p){
     if(punteros.size<2) panActivo = null;
     if(!activo) return;
     activo = false;
+    // Por si quedó un redibujo de rAF pendiente del último pointermove
+    // (con una vista previa vieja de figura/línea/lazo) — que no
+    // sobrescriba lo que se dibuja aquí al soltar.
+    dibujarExtra = null;
     if(modo==='lazo' && lazoEstadoActual==='dibujando'){
       if(lazoPuntos.length>=3){
         lazoEstadoActual = 'lista';
@@ -4963,7 +4984,21 @@ function abrirCambiarPrendaDeFoto(prendaId, url){
 // quedarse guardado en una tabla aparte que nadie más lee.
 async function guardarFechaFotoOrigen(url, valorFecha){
   const fecha = valorFecha ? new Date(valorFecha).toISOString() : '';
-  const usosAfectados = DATA.usos.filter(u=>u.FotoURL===url);
+  let usosAfectados = DATA.usos.filter(u=>u.FotoURL===url);
+  // Puede que esta foto nunca haya quedado registrada como un uso real
+  // (ej. si TODAS sus prendas se marcaron "ya la tengo" en vez de crear
+  // alguna nueva, o el registro se perdió) — sin un USOS que actualizar,
+  // ponerle fecha aquí no hacía nada en Calendario (ni mostraba el
+  // maniquí, ni las prendas). Se crea uno con prendasDeLaFoto(url), que
+  // YA junta tanto las creadas desde esta foto como las emparejadas
+  // ("ya la tengo") — así ninguna de las dos se queda fuera.
+  if(!usosAfectados.length && fecha){
+    const prendas = prendasDeLaFoto(url);
+    if(prendas.length){
+      const r = await apiPost('registrarUso', { prendaIds: prendas.map(p=>p.ID), fecha, fotoUrl: url });
+      if(r.ok){ DATA.usos.push(r.uso); usosAfectados = [r.uso]; }
+    }
+  }
   for(const u of usosAfectados){
     u.Fecha = fecha;
     await apiPost('saveRow', { table:'USOS', row:u });
