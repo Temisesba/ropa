@@ -351,7 +351,7 @@ let SHEET_URL = '';
 // Nombre-landmark de esta versión — cámbialo en cada cambio que se
 // despliegue, así se puede saber a simple vista (en Perfil) si el
 // celular ya está viendo lo último o una copia vieja en caché.
-const BUILD_VERSION = 'Chiapas 2';
+const BUILD_VERSION = 'Palenque';
 let DATA = { prendas: [], usos: [], outfits_sugeridos: [], perfil: [], fotos_origen: [] };
 let showTrash = false;
 let soloFavoritos = false;
@@ -528,6 +528,16 @@ function boot(){
   procesarColaPendiente(); // por si quedó algo pendiente de la sesión anterior
   if('serviceWorker' in navigator){ navigator.serviceWorker.register('sw.js').catch(()=>{}); }
   window.addEventListener('online', ()=>{ refreshData(); procesarColaPendiente(); });
+  // Al minimizar el cel a medio guardado, el guardado sí termina en el
+  // servidor pero la pantalla a veces se queda "pegada" mostrando la
+  // última pintura de antes — forzamos un repintado (sin tocar datos ni
+  // estado) al volver a primer plano para que no se quede congelada.
+  document.addEventListener('visibilitychange', ()=>{
+    if(document.visibilityState==='visible'){
+      const app = document.getElementById('app');
+      if(app){ app.style.display='none'; void app.offsetHeight; app.style.display=''; }
+    }
+  });
 }
 async function refreshData(){
   const r = await apiPost('getAll', {});
@@ -3886,6 +3896,7 @@ async function renderCalendario(){
 // en vez de serializar HTML dentro de atributos onclick (evita líos de
 // escapado con comillas/URLs).
 let galeriaSlides = [];
+let galeriaIndiceActual = 0;
 function abrirGaleria(slides, indice){
   galeriaSlides = slides||[];
   renderGaleria(indice||0);
@@ -3893,18 +3904,38 @@ function abrirGaleria(slides, indice){
 function renderGaleria(indice){
   if(!galeriaSlides.length) return;
   indice = ((indice%galeriaSlides.length)+galeriaSlides.length)%galeriaSlides.length;
+  galeriaIndiceActual = indice;
   let overlay = document.getElementById('galeriaOverlay');
   if(!overlay){
     overlay = document.createElement('div');
     overlay.id = 'galeriaOverlay';
     overlay.className = 'modal-overlay';
     overlay.addEventListener('click', e=>{ if(e.target===overlay) overlay.remove(); });
+    // Deslizar el dedo a la izq/der pasa a la siguiente/anterior foto —
+    // se compara el movimiento horizontal contra el vertical para no
+    // interferir con un scroll accidental, con un umbral chico para que
+    // no se sienta duro.
+    let inicioX = null, inicioY = null;
+    overlay.addEventListener('pointerdown', e=>{ inicioX = e.clientX; inicioY = e.clientY; });
+    overlay.addEventListener('pointerup', e=>{
+      if(inicioX===null) return;
+      const dx = e.clientX-inicioX, dy = e.clientY-inicioY;
+      inicioX = null; inicioY = null;
+      if(Math.abs(dx)>40 && Math.abs(dx)>Math.abs(dy)) renderGaleria(galeriaIndiceActual + (dx<0?1:-1));
+    });
     document.body.appendChild(overlay);
   }
   const flechas = galeriaSlides.length>1 ? `
     <button class="maniqui-arrow left" style="top:50%" onclick="renderGaleria(${indice-1})">‹</button>
     <button class="maniqui-arrow right" style="top:50%" onclick="renderGaleria(${indice+1})">›</button>` : '';
   overlay.innerHTML = `<div style="position:relative;max-width:320px;width:100%">${galeriaSlides[indice]}${flechas}</div>`;
+}
+// Slides de "Fotos subidas" (Perfil): todas las fotos activas (sin
+// papelera), para poder deslizar entre ellas desde cualquier miniatura.
+function abrirGaleriaFotosSubidas(indice){
+  const slides = DATA.fotos_origen.filter(f=>!esVerdadero(f.Papelera))
+    .map(f=>`<img src="${f.URL}" style="max-width:100%;max-height:80vh;border-radius:var(--radius);display:block;margin:0 auto">`);
+  abrirGaleria(slides, indice||0);
 }
 // Slides de un día de Calendario: la foto real (si existe) primero, el
 // maniquí vestido con esas prendas después (si hay capas) — se arma al
@@ -4896,12 +4927,13 @@ function prendasDeLaFoto(url){
 }
 function renderFotosSubidas(){
   const cont = document.getElementById('fotosSubidasArea');
-  if(!DATA.fotos_origen.length){ cont.innerHTML = '<p class="hint">Todavía no hay fotos de origen guardadas.</p>'; return; }
-  cont.innerHTML = DATA.fotos_origen.map(f=>{
+  const activas = DATA.fotos_origen.filter(f=>!esVerdadero(f.Papelera));
+  if(!activas.length){ cont.innerHTML = '<p class="hint">Todavía no hay fotos de origen guardadas.</p>'; return; }
+  cont.innerHTML = activas.map((f,i)=>{
     const prendas = prendasDeLaFoto(f.URL);
     const fechaInput = f.Fecha && !isNaN(new Date(f.Fecha).getTime()) ? new Date(f.Fecha).toISOString().slice(0,10) : '';
     return `<div class="detect-card" style="align-items:flex-start;flex-wrap:wrap">
-      <img src="${f.URL}" onclick="verFotoGrande('${f.URL}')" style="width:64px;height:64px;object-fit:cover;border-radius:8px;cursor:zoom-in;flex:none">
+      <img src="${f.URL}" onclick="abrirGaleriaFotosSubidas(${i})" style="width:64px;height:64px;object-fit:cover;border-radius:8px;cursor:zoom-in;flex:none">
       <div class="fields" style="grid-template-columns:1fr;flex:1">
         <div style="display:flex;gap:6px;flex-wrap:wrap">${prendas.length ? prendas.map(p=>`<div style="width:44px;cursor:pointer" onclick="abrirCambiarPrendaDeFoto('${p.ID}','${f.URL}')" title="${escAttr(p.Tipo||p.Categoria)}">${fotoRecortadaHtml(p,{estilo:'width:44px;height:44px;object-fit:cover;border-radius:6px', clickable:false, iconoTam:16})}</div>`).join('') : '<span class="hint">Sin prendas activas de esta foto</span>'}</div>
         <input type="date" value="${fechaInput}" onchange="guardarFechaFotoOrigen('${f.URL}',this.value)">
@@ -5045,7 +5077,7 @@ async function guardarFechaFotoOrigen(url, valorFecha){
     }
   }
   let f = DATA.fotos_origen.find(x=>x.URL===url);
-  const row = { ID: f?f.ID:uid(), URL:url, Fecha:fecha };
+  const row = { ID: f?f.ID:uid(), URL:url, Fecha:fecha, Papelera: f?esVerdadero(f.Papelera):false };
   if(f) Object.assign(f, row); else DATA.fotos_origen.push(row);
   localStorage.setItem('ropa_data_cache', JSON.stringify(DATA));
   await apiPost('saveRow', { table:'FOTOS_ORIGEN', row });
@@ -5053,17 +5085,25 @@ async function guardarFechaFotoOrigen(url, valorFecha){
   showToast('Fecha actualizada');
 }
 function pedirEliminarFotoOrigen(url){
-  confirmarEliminar('Se va a quitar esta foto de todas las prendas que la usan como referencia — no borra las prendas, solo el enlace a esta foto.', async ()=>{
-    const afectadas = DATA.prendas.filter(p=>p.FotoOrigenURL===url);
-    for(const p of afectadas){
-      p.FotoOrigenURL = '';
-      await apiPost('saveRow', { table:'PRENDAS', row:p });
-    }
+  confirmarEliminar('Se va a quitar esta foto de todas las prendas que la usan como referencia — no borra las prendas, solo el enlace a esta foto. Se manda a la papelera, se puede recuperar.', ()=>{
+    // Borrado suave (Papelera=true, no deleteRow): así, si alguna de las
+    // llamadas de abajo falla por conexión, backfillFotosOrigen() sigue
+    // encontrando esta URL (aunque en papelera) y no la vuelve a crear —
+    // antes, con deleteRow, un solo saveRow fallido hacía que la foto
+    // "eliminada" reapareciera sola al refrescar.
+    // Optimista: se pinta de una vez (instantáneo), la red se dispara
+    // después sin bloquear la pantalla.
     const f = DATA.fotos_origen.find(x=>x.URL===url);
-    if(f){ await apiPost('deleteRow', { table:'FOTOS_ORIGEN', id:f.ID }); DATA.fotos_origen = DATA.fotos_origen.filter(x=>x.URL!==url); }
+    if(f) f.Papelera = true;
+    const afectadas = DATA.prendas.filter(p=>p.FotoOrigenURL===url);
+    afectadas.forEach(p=> p.FotoOrigenURL = '');
     localStorage.setItem('ropa_data_cache', JSON.stringify(DATA));
     renderFotosSubidas();
-    showToast('Foto quitada de tus prendas');
+    showToast('Foto movida a la papelera');
+    (async ()=>{
+      for(const p of afectadas) await apiPost('saveRow', { table:'PRENDAS', row:p });
+      if(f) await apiPost('saveRow', { table:'FOTOS_ORIGEN', row:f });
+    })();
   });
 }
 async function guardarPerfil(){
