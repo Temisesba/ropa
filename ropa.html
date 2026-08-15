@@ -232,6 +232,9 @@ nav.tabbar button .ic{font-size:19px}
           <button class="btn secondary" onclick="usarClimaAutomatico()">📍 Usar mi ubicación</button>
         </div>
       </div>
+      <div class="field"><label class="hint">Algo más para la IA (opcional)</label>
+        <input type="text" id="sugNota" placeholder="Ej: que sea cómodo para caminar, quiero usar mi chamarra azul…">
+      </div>
       <button class="btn" onclick="pedirSugerencias()">✨ Pedir ideas</button>
       <div id="sugResultados"></div>
     </section>
@@ -351,7 +354,7 @@ let SHEET_URL = '';
 // Nombre-landmark de esta versión — cámbialo en cada cambio que se
 // despliegue, así se puede saber a simple vista (en Perfil) si el
 // celular ya está viendo lo último o una copia vieja en caché.
-const BUILD_VERSION = 'Bonampak';
+const BUILD_VERSION = 'Coba';
 let DATA = { prendas: [], usos: [], outfits_sugeridos: [], perfil: [], fotos_origen: [] };
 let showTrash = false;
 let soloFavoritos = false;
@@ -3268,10 +3271,11 @@ function usarClimaAutomatico(){
 async function pedirSugerencias(){
   const evento = document.getElementById('sugEvento').value;
   const clima = document.getElementById('sugClima').value.trim();
+  const nota = document.getElementById('sugNota').value.trim();
   const perfil = DATA.perfil[0] || {};
   const wrap = document.getElementById('sugResultados');
   wrap.innerHTML = '<p class="hint">Pensando outfits…</p>';
-  const r = await apiPost('sugerirOutfit', { evento, clima, tonoPiel: perfil.TonoPiel||'', subtono: perfil.Subtono||'' });
+  const r = await apiPost('sugerirOutfit', { evento, clima, nota, tonoPiel: perfil.TonoPiel||'', subtono: perfil.Subtono||'' });
   if(!r.ok){ wrap.innerHTML = `<p class="hint">No se pudo generar ideas: ${r.error||'sin conexión'}</p>`; return; }
   if(!r.outfits || !r.outfits.length){ wrap.innerHTML = '<p class="hint">La IA no encontró combinaciones — agrega más prendas al catálogo.</p>'; return; }
   const badgeModelo = r.modelo ? `<p class="hint">🤖 ${mensajeModelo(r,'Sugerido')}</p>` : '';
