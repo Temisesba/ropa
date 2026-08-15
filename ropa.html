@@ -351,7 +351,7 @@ let SHEET_URL = '';
 // Nombre-landmark de esta versión — cámbialo en cada cambio que se
 // despliegue, así se puede saber a simple vista (en Perfil) si el
 // celular ya está viendo lo último o una copia vieja en caché.
-const BUILD_VERSION = 'Yaxchilan';
+const BUILD_VERSION = 'Bonampak';
 let DATA = { prendas: [], usos: [], outfits_sugeridos: [], perfil: [], fotos_origen: [] };
 let showTrash = false;
 let soloFavoritos = false;
@@ -510,9 +510,21 @@ function finishSetup(){
   localStorage.setItem('ropa_gas_url', GAS_URL);
   err.textContent = 'Conectando…';
   apiPost('init', {}).then(r=>{
-    if(r && r.ok){ DATA = normalizeData(r.data); SHEET_URL = r.sheetUrl||''; localStorage.setItem('ropa_data_cache', JSON.stringify(DATA)); boot(); }
+    if(r && r.ok){ DATA = normalizeData(r.data); SHEET_URL = r.sheetUrl||''; guardarCacheLocal(); boot(); }
     else { err.textContent = 'No se pudo conectar: '+((r&&r.error)||'revisa el enlace'); }
   });
+}
+// El caché local es solo para arrancar rápido/offline — el Sheet (vía
+// apiPost) siempre es la fuente real. Si el celular ya no tiene espacio
+// de almacenamiento, `localStorage.setItem` truena con QuotaExceededError
+// — sin este try/catch, esa excepción mataba en silencio lo que quedaba
+// de la función que llamaba a guardar (el botón se quedaba pegado en
+// "Guardando…" para siempre, aunque el guardado real en el servidor ya
+// hubiera funcionado). Detectado 2026-08-15 vía un mensaje de error real
+// en pantalla ("Failed to execute 'setItem'... exceeded the quota").
+function guardarCacheLocal(){
+  try{ localStorage.setItem('ropa_data_cache', JSON.stringify(DATA)); }
+  catch(e){ console.warn('No se pudo guardar el caché local (almacenamiento lleno):', e); }
 }
 function normalizeData(d){
   return { prendas: d.prendas||[], usos: d.usos||[], outfits_sugeridos: d.outfits_sugeridos||[], perfil: d.perfil||[], fotos_origen: d.fotos_origen||[] };
@@ -546,7 +558,7 @@ async function refreshData(){
     if(r.sheetUrl) SHEET_URL = r.sheetUrl;
     await backfillFotosOrigen();
     restaurarPreferenciasDesdePerfil();
-    localStorage.setItem('ropa_data_cache', JSON.stringify(DATA));
+    guardarCacheLocal();
     renderAllScreens();
   }
 }
@@ -721,7 +733,7 @@ async function guardarPrendaManualDesdeFoto(recortada){
   DATA.prendas.push(row);
   const r = await apiPost('registrarUso', { prendaIds:[row.ID], fotoUrl: origenUrl });
   if(r.ok){ row.VecesUsado = 1; DATA.usos.push(r.uso); }
-  localStorage.setItem('ropa_data_cache', JSON.stringify(DATA));
+  guardarCacheLocal();
   prendasDeEsteLote.push(row.ID);
   showToast(row.FotoGeneradaURL ? '✓ Guardada — usa 🧽 Borrador para quitarle el fondo' : '✓ Guardada (intenta ajustarla desde Editar prenda)');
   uploadIndex++;
@@ -1664,7 +1676,7 @@ async function guardarDetecciones(){
         DATA.usos.push(r.uso);
       }
     }
-    localStorage.setItem('ropa_data_cache', JSON.stringify(DATA));
+    guardarCacheLocal();
     prendasDeEsteLote.push(...todosLosIds);
     showToast('✓ Prendas guardadas');
     uploadIndex++;
@@ -1872,7 +1884,7 @@ async function guardarRecortesHoy(){
   if(r.ok){
     prendaIds.forEach(id=>{ const p=findPrenda(id); if(p){ p.UltimoUso=fecha; p.VecesUsado=(Number(p.VecesUsado)||0)+1; } });
     DATA.usos.push(r.uso);
-    localStorage.setItem('ropa_data_cache', JSON.stringify(DATA));
+    guardarCacheLocal();
     hoyDetections = null;
     document.getElementById('hoyReviewArea').innerHTML = '';
     renderHoy();
@@ -1951,7 +1963,7 @@ async function toggleFavorito(id){
   p.Favorito = !esVerdadero(p.Favorito);
   renderCatalogo();
   await apiPost('saveRow', { table:'PRENDAS', row:p });
-  localStorage.setItem('ropa_data_cache', JSON.stringify(DATA));
+  guardarCacheLocal();
 }
 function pedirEliminarPrenda(id){
   const p = findPrenda(id); if(!p) return;
@@ -1959,7 +1971,7 @@ function pedirEliminarPrenda(id){
     p.Papelera = true;
     renderCatalogo();
     await apiPost('saveRow', { table:'PRENDAS', row:p });
-    localStorage.setItem('ropa_data_cache', JSON.stringify(DATA));
+    guardarCacheLocal();
     showToast('Movida a la papelera');
   });
 }
@@ -1968,7 +1980,7 @@ async function restaurarPrenda(id){
   p.Papelera = false;
   renderCatalogo();
   await apiPost('saveRow', { table:'PRENDAS', row:p });
-  localStorage.setItem('ropa_data_cache', JSON.stringify(DATA));
+  guardarCacheLocal();
   showToast('Restaurada');
 }
 function borrarPermanente(id){
@@ -1976,7 +1988,7 @@ function borrarPermanente(id){
   confirmarEliminar(`"${escAttr(p.Tipo||p.Categoria)}" se eliminará para siempre, no se puede deshacer.`, async ()=>{
     await apiPost('deleteRow', { table:'PRENDAS', id });
     DATA.prendas = DATA.prendas.filter(x=>x.ID!==id);
-    localStorage.setItem('ropa_data_cache', JSON.stringify(DATA));
+    guardarCacheLocal();
     renderCatalogo();
     showToast('Eliminada definitivamente');
   });
@@ -1988,7 +2000,7 @@ function vaciarPapelera(){
     showToast('Vaciando papelera…');
     for(const p of items){ await apiPost('deleteRow', { table:'PRENDAS', id:p.ID }); }
     DATA.prendas = DATA.prendas.filter(p=>!esVerdadero(p.Papelera));
-    localStorage.setItem('ropa_data_cache', JSON.stringify(DATA));
+    guardarCacheLocal();
     renderCatalogo();
     showToast('Papelera vacía');
   });
@@ -2124,7 +2136,7 @@ function abrirEditarPrenda(id){
     p.FotoURL = subida.url;
     p.BBoxJSON = JSON.stringify(final.bboxPct);
     await apiPost('saveRow', { table:'PRENDAS', row:p });
-    localStorage.setItem('ropa_data_cache', JSON.stringify(DATA));
+    guardarCacheLocal();
     renderCatalogo();
     refrescarFotoModal(p);
     showToast('Foto guardada — usa 🧽 Borrador para quitarle el fondo a mano');
@@ -2140,7 +2152,7 @@ function abrirEditarPrenda(id){
     overlay.remove();
     renderCatalogo();
     await apiPost('saveRow', { table:'PRENDAS', row:p });
-    localStorage.setItem('ropa_data_cache', JSON.stringify(DATA));
+    guardarCacheLocal();
     showToast('Guardado');
   };
 }
@@ -2162,14 +2174,14 @@ function cablearBotonesFoto(p){
   if(btnGen) btnGen.onclick = async ()=>{
     p.FotoURL = p.FotoGeneradaURL;
     await apiPost('saveRow', { table:'PRENDAS', row:p });
-    localStorage.setItem('ropa_data_cache', JSON.stringify(DATA));
+    guardarCacheLocal();
     renderCatalogo(); refrescarFotoModal(p); showToast('Mostrando la foto generada');
   };
   const btnReal = document.getElementById('edUsarReal');
   if(btnReal) btnReal.onclick = async ()=>{
     p.FotoURL = p.FotoRealURL;
     await apiPost('saveRow', { table:'PRENDAS', row:p });
-    localStorage.setItem('ropa_data_cache', JSON.stringify(DATA));
+    guardarCacheLocal();
     renderCatalogo(); refrescarFotoModal(p); showToast('Mostrando la foto real');
   };
   const btnRegen = document.getElementById('edRegenerar');
@@ -2184,7 +2196,7 @@ function cablearBotonesFoto(p){
     const ok = await realinearPrendaAMolde(p, reglaMolde(clave));
     btnMolde.disabled = false; btnMolde.textContent = '📐 Aplicar molde';
     if(!ok){ showToast('No se pudo aplicar el molde (revisa la conexión)'); return; }
-    localStorage.setItem('ropa_data_cache', JSON.stringify(DATA));
+    guardarCacheLocal();
     renderCatalogo(); refrescarFotoModal(p);
     showToast('Puesta en el molde de "'+moldeBase(clave).nombre+'"');
   };
@@ -2824,7 +2836,7 @@ async function abrirBorrador(p){
       p.FotoURL = subida.url;
       p.BBoxJSON = JSON.stringify(bboxPct);
       await apiPost('saveRow', { table:'PRENDAS', row:p });
-      localStorage.setItem('ropa_data_cache', JSON.stringify(DATA));
+      guardarCacheLocal();
       renderCatalogo();
       refrescarVestidorDOM();
       renderCapasLista();
@@ -2868,7 +2880,7 @@ async function aplicarCapaCandidata(p, candidata){
   p.BBoxJSON = JSON.stringify(candidata.bboxPct);
   p.ClaveColor = candidata.claveTexto;
   await apiPost('saveRow', { table:'PRENDAS', row:p });
-  localStorage.setItem('ropa_data_cache', JSON.stringify(DATA));
+  guardarCacheLocal();
   renderCatalogo();
   refrescarVestidorDOM();
   renderCapasLista();
@@ -2930,7 +2942,7 @@ function abrirAccionesPrenda(p){
       overlay.remove();
       const ok = await realinearPrendaAMolde(p, reglaMolde(clave));
       if(!ok){ showToast('No se pudo aplicar el molde (revisa la conexión)'); return; }
-      localStorage.setItem('ropa_data_cache', JSON.stringify(DATA));
+      guardarCacheLocal();
       renderCatalogo();
       refrescarVestidorDOM();
       renderCapasLista();
@@ -3077,7 +3089,7 @@ async function guardarAjusteManiqui(){
       guardarMoldesUsuario();
       guardoMolde = true;
     }
-    localStorage.setItem('ropa_data_cache', JSON.stringify(DATA));
+    guardarCacheLocal();
     renderCatalogo();
     refrescarFotoModal(p);
     refrescarVestidorDOM();
@@ -3191,7 +3203,7 @@ async function guardarUsoHoy(){
       p.UltimoUso = fecha; p.VecesUsado = (Number(p.VecesUsado)||0)+1;
     });
     DATA.usos.push(r.uso);
-    localStorage.setItem('ropa_data_cache', JSON.stringify(DATA));
+    guardarCacheLocal();
     seleccionHoy.clear();
     document.getElementById('hoyEvento').value='';
     renderHoy();
@@ -3216,7 +3228,7 @@ function pedirEliminarUso(id){
   confirmarEliminar('Se eliminará este registro de uso.', async ()=>{
     await apiPost('deleteRow', { table:'USOS', id });
     DATA.usos = DATA.usos.filter(u=>u.ID!==id);
-    localStorage.setItem('ropa_data_cache', JSON.stringify(DATA));
+    guardarCacheLocal();
     // Se llama desde Hoy y desde Calendario — cada render ya se protege
     // solo (revisa que su contenedor exista), así que no hace falta
     // saber desde cuál pantalla se llamó.
@@ -3289,7 +3301,7 @@ async function usarOutfitHoy(prendaIds){
   if(r.ok){
     prendaIds.forEach(id=>{ const p=findPrenda(id); if(p){ p.UltimoUso=fecha; p.VecesUsado=(Number(p.VecesUsado)||0)+1; } });
     DATA.usos.push(r.uso);
-    localStorage.setItem('ropa_data_cache', JSON.stringify(DATA));
+    guardarCacheLocal();
     showToast('Registrado como lo que usaste hoy');
   } else showToast('No se pudo registrar: '+(r.error||'sin conexión'));
 }
@@ -3306,7 +3318,7 @@ async function guardarOutfitGuardado(prendaIds, motivo, fecha, evento){
   if(!prendaIds || !prendaIds.length){ showToast('No hay prendas que guardar'); return null; }
   const row = { ID: uid(), Fecha: fecha||'', PrendaIDsJSON: JSON.stringify(prendaIds), Motivo: motivo||'', Evento: evento||'', Papelera:false };
   DATA.outfits_sugeridos.push(row);
-  localStorage.setItem('ropa_data_cache', JSON.stringify(DATA));
+  guardarCacheLocal();
   await apiPost('saveRow', { table:'OUTFITS_SUGERIDOS', row });
   showToast(fecha ? 'Outfit planeado para ese día' : 'Outfit guardado');
   return row;
@@ -3314,7 +3326,7 @@ async function guardarOutfitGuardado(prendaIds, motivo, fecha, evento){
 async function eliminarOutfitGuardado(id){
   const o = DATA.outfits_sugeridos.find(x=>x.ID===id); if(!o) return;
   o.Papelera = true;
-  localStorage.setItem('ropa_data_cache', JSON.stringify(DATA));
+  guardarCacheLocal();
   await apiPost('saveRow', { table:'OUTFITS_SUGERIDOS', row:o });
   showToast('Eliminado');
   renderCatalogo(); renderCalendario();
@@ -3322,7 +3334,7 @@ async function eliminarOutfitGuardado(id){
 async function guardarNotaOutfit(id, notas){
   const o = DATA.outfits_sugeridos.find(x=>x.ID===id); if(!o) return;
   o.Motivo = notas;
-  localStorage.setItem('ropa_data_cache', JSON.stringify(DATA));
+  guardarCacheLocal();
   await apiPost('saveRow', { table:'OUTFITS_SUGERIDOS', row:o });
 }
 // La fecha queda editable directo en la tarjeta — pedido explícito: antes
@@ -3331,7 +3343,7 @@ async function guardarNotaOutfit(id, notas){
 async function guardarFechaOutfit(id, valorFecha){
   const o = DATA.outfits_sugeridos.find(x=>x.ID===id); if(!o) return;
   o.Fecha = valorFecha ? new Date(valorFecha).toISOString() : '';
-  localStorage.setItem('ropa_data_cache', JSON.stringify(DATA));
+  guardarCacheLocal();
   await apiPost('saveRow', { table:'OUTFITS_SUGERIDOS', row:o });
   showToast('Fecha actualizada');
   renderCalendario(); renderCatalogo();
@@ -3995,7 +4007,7 @@ function agregarFotoDia(usoId){
       const r = await apiPost('agregarFotoAUso', { usoId, fotoUrl: subida.url });
       if(r.ok){ u.FotosURLsJSON = JSON.stringify(r.fotosURLs); if(!u.FotoURL) u.FotoURL = subida.url; }
     }
-    localStorage.setItem('ropa_data_cache', JSON.stringify(DATA));
+    guardarCacheLocal();
     renderCalendario();
     showToast('✓ Foto'+(files.length>1?'s agregadas':' agregada'));
   };
@@ -4014,7 +4026,7 @@ async function guardarFechaUso(usoId, valorFecha){
     const p = findPrenda(id);
     if(p){ p.UltimoUso = fecha; await apiPost('saveRow', { table:'PRENDAS', row:p }); }
   }
-  localStorage.setItem('ropa_data_cache', JSON.stringify(DATA));
+  guardarCacheLocal();
   showToast('Fecha actualizada');
   renderCalendario();
 }
@@ -4098,7 +4110,7 @@ async function cerrarEditarUso(guardar){
       if(u.Fecha) p.UltimoUso = u.Fecha;
       await apiPost('saveRow', { table:'PRENDAS', row:p });
     }
-    localStorage.setItem('ropa_data_cache', JSON.stringify(DATA));
+    guardarCacheLocal();
     showToast('Prendas actualizadas');
     renderCalendario();
   }
@@ -4447,7 +4459,7 @@ async function guardarCategoria(nombreAnterior, nombreNuevo, zona){
     CATEGORIA_ZONA[nombreNuevo] = zona;
     if(!CATEGORIA_ICONO[nombreNuevo]) CATEGORIA_ICONO[nombreNuevo] = '🏷️';
     guardarCategoriasPersonalizadas();
-    if(afectadas.length) localStorage.setItem('ropa_data_cache', JSON.stringify(DATA));
+    if(afectadas.length) guardarCacheLocal();
     renderCategoriasPerfil();
     renderCatalogo();
     showToast(fusion ? `Fusionada con "${nombreNuevo}"` : 'Categoría actualizada');
@@ -4517,7 +4529,7 @@ function eliminarEstiloCabello(id){
     p.Papelera = true;
     if(localStorage.getItem('ropa_maniqui_peinado')===id) await elegirPeinadoManiqui('ninguno');
     await apiPost('saveRow', { table:'PRENDAS', row:p });
-    localStorage.setItem('ropa_data_cache', JSON.stringify(DATA));
+    guardarCacheLocal();
     renderEstilosCabelloPerfil();
     showToast('Movido a la papelera');
   });
@@ -4578,7 +4590,7 @@ async function generarCabelloConIA(descripcion){
   };
   await apiPost('saveRow', { table:'PRENDAS', row });
   DATA.prendas.push(row);
-  localStorage.setItem('ropa_data_cache', JSON.stringify(DATA));
+  guardarCacheLocal();
   await elegirPeinadoManiqui(row.ID);
   showToast('✓ Estilo de cabello agregado');
 }
@@ -4617,7 +4629,7 @@ async function guardarEstiloCabelloDeFoto(recortada){
   const row = await crearPrendaSinIA({ categoria:'Cabello', tipo:'Cabello (foto)', cropPreview: recortada.dataUrl }, origenUrl);
   await apiPost('saveRow', { table:'PRENDAS', row });
   DATA.prendas.push(row);
-  localStorage.setItem('ropa_data_cache', JSON.stringify(DATA));
+  guardarCacheLocal();
   await elegirPeinadoManiqui(row.ID);
   showToast('✓ Estilo de cabello agregado — usa 🧽 Borrador si necesita quitarle el fondo');
 }
@@ -4638,7 +4650,7 @@ async function guardarEstiloCabelloDeFotoConIA(recortada){
   const row = await crearFilaPrenda(it, origenUrl);
   await apiPost('saveRow', { table:'PRENDAS', row });
   DATA.prendas.push(row);
-  localStorage.setItem('ropa_data_cache', JSON.stringify(DATA));
+  guardarCacheLocal();
   await elegirPeinadoManiqui(row.ID);
   showToast(row.FotoGeneradaURL ? '✓ Estilo de cabello generado' : '✓ Guardada tu foto — la IA no lo logró bien esta vez, ajústala con ✏️ Editar');
 }
@@ -4861,7 +4873,7 @@ async function reaplicarMoldeATipo(clave, btnId){
     if(btn){ btn.disabled = true; btn.textContent = `Re-alineando ${i+1}/${lista.length}…`; }
     if(await realinearPrendaAMolde(lista[i], regla)) ok++;
   }
-  localStorage.setItem('ropa_data_cache', JSON.stringify(DATA));
+  guardarCacheLocal();
   renderCatalogo();
   if(btn){ btn.disabled = false; btn.textContent = textoOriginal; }
   renderMoldes();
@@ -5034,7 +5046,7 @@ async function vincularPrendaAFoto(id, url, reemplazarId){
   }
   p.FotoOrigenURL = url;
   await apiPost('saveRow', { table:'PRENDAS', row:p });
-  localStorage.setItem('ropa_data_cache', JSON.stringify(DATA));
+  guardarCacheLocal();
   document.querySelectorAll('.modal-overlay').forEach(o=>o.remove());
   renderFotosSubidas();
   showToast('Prenda agregada a esta foto');
@@ -5064,7 +5076,7 @@ function abrirCambiarPrendaDeFoto(prendaId, url){
     overlay.remove();
     p.FotoOrigenURL = '';
     await apiPost('saveRow', { table:'PRENDAS', row:p });
-    localStorage.setItem('ropa_data_cache', JSON.stringify(DATA));
+    guardarCacheLocal();
     renderFotosSubidas();
     showToast('Quitada de esta foto');
   };
@@ -5105,7 +5117,7 @@ async function guardarFechaFotoOrigen(url, valorFecha){
   let f = DATA.fotos_origen.find(x=>x.URL===url);
   const row = { ID: f?f.ID:uid(), URL:url, Fecha:fecha, Papelera: f?esVerdadero(f.Papelera):false };
   if(f) Object.assign(f, row); else DATA.fotos_origen.push(row);
-  localStorage.setItem('ropa_data_cache', JSON.stringify(DATA));
+  guardarCacheLocal();
   await apiPost('saveRow', { table:'FOTOS_ORIGEN', row });
   renderFotosSubidas();
   showToast('Fecha actualizada');
@@ -5123,7 +5135,7 @@ function pedirEliminarFotoOrigen(url){
     if(f) f.Papelera = true;
     const afectadas = DATA.prendas.filter(p=>p.FotoOrigenURL===url);
     afectadas.forEach(p=> p.FotoOrigenURL = '');
-    localStorage.setItem('ropa_data_cache', JSON.stringify(DATA));
+    guardarCacheLocal();
     renderFotosSubidas();
     showToast('Foto movida a la papelera');
     (async ()=>{
@@ -5146,7 +5158,7 @@ async function guardarPerfil(){
     // pisarlos, por eso se parte de "anterior" en vez de un row en blanco.
   });
   if(idx>=0) DATA.perfil[idx] = row; else DATA.perfil.push(row);
-  localStorage.setItem('ropa_data_cache', JSON.stringify(DATA));
+  guardarCacheLocal();
   await apiPost('saveRow', { table:'PERFIL', row });
   showToast('Perfil guardado');
 }
@@ -5158,7 +5170,7 @@ async function guardarCampoPerfil(campo, valor){
   const anterior = idx>=0 ? DATA.perfil[idx] : { ID: PERFIL_ID };
   const row = Object.assign({}, anterior, { [campo]: valor });
   if(idx>=0) DATA.perfil[idx] = row; else DATA.perfil.push(row);
-  localStorage.setItem('ropa_data_cache', JSON.stringify(DATA));
+  guardarCacheLocal();
   await apiPost('saveRow', { table:'PERFIL', row });
 }
 // Notas libres en Perfil: se guardan solas 800ms después de dejar de
@@ -5180,7 +5192,7 @@ async function guardarNotasPerfil(){
   const idx = DATA.perfil.findIndex(x=>x.ID===PERFIL_ID);
   const row = idx>=0 ? { ...DATA.perfil[idx], Notas: val } : { ID: PERFIL_ID, TonoPiel:'', Subtono:'', Ciudad:'', Nombre:'', Notas: val };
   if(idx>=0) DATA.perfil[idx] = row; else DATA.perfil.push(row);
-  localStorage.setItem('ropa_data_cache', JSON.stringify(DATA));
+  guardarCacheLocal();
   const estado = document.getElementById('notasEstado');
   if(estado) estado.textContent = 'Guardando…';
   const r = await apiPost('saveRow', { table:'PERFIL', row });
