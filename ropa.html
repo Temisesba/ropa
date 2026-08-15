@@ -351,7 +351,7 @@ let SHEET_URL = '';
 // Nombre-landmark de esta versión — cámbialo en cada cambio que se
 // despliegue, así se puede saber a simple vista (en Perfil) si el
 // celular ya está viendo lo último o una copia vieja en caché.
-const BUILD_VERSION = 'Campeche 2';
+const BUILD_VERSION = 'Chiapas 2';
 let DATA = { prendas: [], usos: [], outfits_sugeridos: [], perfil: [], fotos_origen: [] };
 let showTrash = false;
 let soloFavoritos = false;
@@ -451,9 +451,17 @@ let reintentandoCola = false;
 async function apiPost(action, params){
   if(needsSetup()) return { ok:false, error:'sin vincular' };
   const body = Object.assign({ action }, params||{});
+  // Sin límite de tiempo, un fetch atascado (conexión que se traba a
+  // medias, no que falla de plano) se queda esperando indefinidamente
+  // sin mostrar ningún error — reportado en vivo: "le doy guardar y se
+  // queda guardando". 30s alcanza de sobra para lo más lento que hace
+  // esta app (subir una imagen) sin dejar a la usuaria esperando sin
+  // saber si algo se rompió.
+  const controlador = new AbortController();
+  const limite = setTimeout(()=> controlador.abort(), 30000);
   try{
     const f = new FormData(); f.append('payload', JSON.stringify(body));
-    const r = await fetch(GAS_URL, { method:'POST', body:f });
+    const r = await fetch(GAS_URL, { method:'POST', body:f, signal: controlador.signal });
     if(!r.ok) throw new Error('HTTP '+r.status);
     const data = await r.json();
     setConnBanner(false);
@@ -461,7 +469,9 @@ async function apiPost(action, params){
   }catch(e){
     setConnBanner(true);
     if(ACCIONES_REINTENTABLES.has(action) && !reintentandoCola) encolarReintento(action, params);
-    return { ok:false, error: e.message||'sin conexión' };
+    return { ok:false, error: e.name==='AbortError' ? 'tardó demasiado, sin respuesta' : (e.message||'sin conexión') };
+  }finally{
+    clearTimeout(limite);
   }
 }
 function encolarReintento(action, params){
