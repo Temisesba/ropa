@@ -351,7 +351,7 @@ let SHEET_URL = '';
 // Nombre-landmark de esta versión — cámbialo en cada cambio que se
 // despliegue, así se puede saber a simple vista (en Perfil) si el
 // celular ya está viendo lo último o una copia vieja en caché.
-const BUILD_VERSION = 'Palenque';
+const BUILD_VERSION = 'Yaxchilan';
 let DATA = { prendas: [], usos: [], outfits_sugeridos: [], perfil: [], fotos_origen: [] };
 let showTrash = false;
 let soloFavoritos = false;
@@ -1623,44 +1623,56 @@ async function guardarDetecciones(){
   if(!d.items.length){ omitirFoto(); return; }
   const btn = document.getElementById('btnGuardarPrendas');
   if(btn){ btn.disabled = true; btn.textContent = 'Guardando…'; }
-  // Si venimos de "Analizar" sobre una foto ya subida (Perfil → Fotos
-  // subidas), reusamos su URL en vez de volver a subirla — sería la
-  // misma foto duplicada en Drive por gusto.
-  let origenUrl = d.origenUrlExistente || '';
-  if(!origenUrl){
-    const origen = await apiPost('uploadImage', { imageBase64: d.base64, mimeType: d.mimeType, fileName: 'foto-'+Date.now()+'.jpg' });
-    origenUrl = origen.ok ? origen.url : '';
-  }
-  if(origenUrl) await registrarFotoOrigenSiFalta(origenUrl);
-  // Una sola fecha para TODA la foto (todas las prendas de esa foto se
-  // usaron el mismo día, sea cual sea) — sin fecha, registrarUso solo
-  // cuenta, no toca UltimoUso. Esto también aplica a las prendas NUEVAS:
-  // la foto de origen ya ES un uso real (si ahí sale puesta), así que
-  // ninguna prenda se queda en "0 usos" solo por ser recién creada.
-  const fecha = d.fechaFoto ? new Date(d.fechaFoto).toISOString() : undefined;
-  const todosLosIds = [];
-  for(let i=0;i<d.items.length;i++){
-    const it = d.items[i];
-    if(it.matchId){ todosLosIds.push(it.matchId); continue; }
-    if(btn) btn.textContent = it.sinIA ? `Guardando prenda ${i+1}/${d.items.length}…` : `Generando prenda ${i+1}/${d.items.length}…`;
-    const row = it.sinIA ? await crearPrendaSinIA(it, origenUrl) : await crearFilaPrenda(it, origenUrl);
-    await apiPost('saveRow', { table:'PRENDAS', row });
-    DATA.prendas.push(row);
-    todosLosIds.push(row.ID);
-  }
-  if(todosLosIds.length){
-    if(btn) btn.textContent = 'Registrando en el historial…';
-    const r = await apiPost('registrarUso', { prendaIds: todosLosIds, fecha, fotoUrl: origenUrl });
-    if(r.ok){
-      todosLosIds.forEach(id=>{ const p=findPrenda(id); if(p){ p.VecesUsado=(Number(p.VecesUsado)||0)+1; if(fecha) p.UltimoUso=fecha; } });
-      DATA.usos.push(r.uso);
+  // Red de seguridad: cualquier excepción inesperada a medio guardar
+  // (no solo una falla de red — ya cubierta por apiPost) dejaba el botón
+  // "Guardando…" congelado para siempre, sin aviso, aunque los pasos
+  // anteriores del ciclo ya se hubieran guardado de verdad — reportado
+  // como "se queda trabado, ya no avanza". Con este try/catch, cualquier
+  // error se muestra y el botón se libera para reintentar, en vez de
+  // quedarse pegado en silencio.
+  try{
+    // Si venimos de "Analizar" sobre una foto ya subida (Perfil → Fotos
+    // subidas), reusamos su URL en vez de volver a subirla — sería la
+    // misma foto duplicada en Drive por gusto.
+    let origenUrl = d.origenUrlExistente || '';
+    if(!origenUrl){
+      const origen = await apiPost('uploadImage', { imageBase64: d.base64, mimeType: d.mimeType, fileName: 'foto-'+Date.now()+'.jpg' });
+      origenUrl = origen.ok ? origen.url : '';
     }
+    if(origenUrl) await registrarFotoOrigenSiFalta(origenUrl);
+    // Una sola fecha para TODA la foto (todas las prendas de esa foto se
+    // usaron el mismo día, sea cual sea) — sin fecha, registrarUso solo
+    // cuenta, no toca UltimoUso. Esto también aplica a las prendas NUEVAS:
+    // la foto de origen ya ES un uso real (si ahí sale puesta), así que
+    // ninguna prenda se queda en "0 usos" solo por ser recién creada.
+    const fecha = d.fechaFoto ? new Date(d.fechaFoto).toISOString() : undefined;
+    const todosLosIds = [];
+    for(let i=0;i<d.items.length;i++){
+      const it = d.items[i];
+      if(it.matchId){ todosLosIds.push(it.matchId); continue; }
+      if(btn) btn.textContent = it.sinIA ? `Guardando prenda ${i+1}/${d.items.length}…` : `Generando prenda ${i+1}/${d.items.length}…`;
+      const row = it.sinIA ? await crearPrendaSinIA(it, origenUrl) : await crearFilaPrenda(it, origenUrl);
+      await apiPost('saveRow', { table:'PRENDAS', row });
+      DATA.prendas.push(row);
+      todosLosIds.push(row.ID);
+    }
+    if(todosLosIds.length){
+      if(btn) btn.textContent = 'Registrando en el historial…';
+      const r = await apiPost('registrarUso', { prendaIds: todosLosIds, fecha, fotoUrl: origenUrl });
+      if(r.ok){
+        todosLosIds.forEach(id=>{ const p=findPrenda(id); if(p){ p.VecesUsado=(Number(p.VecesUsado)||0)+1; if(fecha) p.UltimoUso=fecha; } });
+        DATA.usos.push(r.uso);
+      }
+    }
+    localStorage.setItem('ropa_data_cache', JSON.stringify(DATA));
+    prendasDeEsteLote.push(...todosLosIds);
+    showToast('✓ Prendas guardadas');
+    uploadIndex++;
+    procesarSiguienteFoto();
+  }catch(e){
+    showToast('Algo falló guardando ('+(e.message||'error inesperado')+') — lo ya guardado no se perdió, intenta de nuevo');
+    if(btn){ btn.disabled = false; btn.textContent = 'Guardar prendas'; }
   }
-  localStorage.setItem('ropa_data_cache', JSON.stringify(DATA));
-  prendasDeEsteLote.push(...todosLosIds);
-  showToast('✓ Prendas guardadas');
-  uploadIndex++;
-  procesarSiguienteFoto();
 }
 
 // ============================================================
@@ -2801,21 +2813,28 @@ async function abrirBorrador(p){
   document.getElementById('borradorGuardar').onclick = async ()=>{
     const btn = document.getElementById('borradorGuardar');
     btn.disabled = true; btn.textContent = 'Guardando…';
-    const dataUrl = buffer.toDataURL('image/png');
-    const bboxPct = escanearBboxAlfa(bctx, buffer.width, buffer.height);
-    const subida = await apiPost('uploadImage', { imageBase64: dataUrl.split(',')[1], mimeType:'image/png', fileName:'capa-borrada-'+Date.now()+'.png' });
-    if(!subida.ok){ showToast('No se pudo guardar: '+(subida.error||'sin conexión')); btn.disabled=false; btn.textContent='💾 Guardar'; return; }
-    p.FotoGeneradaURL = subida.url;
-    p.FotoURL = subida.url;
-    p.BBoxJSON = JSON.stringify(bboxPct);
-    await apiPost('saveRow', { table:'PRENDAS', row:p });
-    localStorage.setItem('ropa_data_cache', JSON.stringify(DATA));
-    renderCatalogo();
-    refrescarVestidorDOM();
-    renderCapasLista();
-    overlay.remove();
-    refrescarFotoModal(p);
-    showToast('Guardado');
+    // Red de seguridad: un error inesperado aquí (no solo de red) dejaba
+    // el botón "Guardando…" pegado para siempre sin aviso.
+    try{
+      const dataUrl = buffer.toDataURL('image/png');
+      const bboxPct = escanearBboxAlfa(bctx, buffer.width, buffer.height);
+      const subida = await apiPost('uploadImage', { imageBase64: dataUrl.split(',')[1], mimeType:'image/png', fileName:'capa-borrada-'+Date.now()+'.png' });
+      if(!subida.ok){ showToast('No se pudo guardar: '+(subida.error||'sin conexión')); btn.disabled=false; btn.textContent='💾 Guardar'; return; }
+      p.FotoGeneradaURL = subida.url;
+      p.FotoURL = subida.url;
+      p.BBoxJSON = JSON.stringify(bboxPct);
+      await apiPost('saveRow', { table:'PRENDAS', row:p });
+      localStorage.setItem('ropa_data_cache', JSON.stringify(DATA));
+      renderCatalogo();
+      refrescarVestidorDOM();
+      renderCapasLista();
+      overlay.remove();
+      refrescarFotoModal(p);
+      showToast('Guardado');
+    }catch(e){
+      showToast('Algo falló guardando ('+(e.message||'error inesperado')+') — intenta de nuevo');
+      btn.disabled = false; btn.textContent = '💾 Guardar';
+    }
   };
 }
 // Muestra el resultado de la IA como PROPUESTA, sin guardarlo todavía —
@@ -3031,43 +3050,50 @@ async function guardarAjusteManiqui(){
   const { p, dx, dy, sx, sy } = ajusteManiqui;
   const btn = document.getElementById('ajustarGuardar');
   if(btn){ btn.disabled=true; btn.textContent='Guardando…'; }
-  const fileId = fileIdDeUrlDrive(p.FotoGeneradaURL);
-  if(!fileId){ showToast('No se pudo identificar la capa actual'); if(btn){btn.disabled=false;btn.textContent='💾 Guardar ajuste';} return; }
-  const r = await apiPost('descargarImagenDrive', { fileId });
-  if(!r.ok){ showToast('No se pudo cargar la capa: '+(r.error||'sin conexión')); if(btn){btn.disabled=false;btn.textContent='💾 Guardar ajuste';} return; }
-  const resultado = await aplicarAjusteManual('data:'+r.mimeType+';base64,'+r.base64, { dx, dy, sx, sy });
-  if(!resultado){ showToast('No se pudo aplicar el ajuste'); if(btn){btn.disabled=false;btn.textContent='💾 Guardar ajuste';} return; }
-  const subida = await apiPost('uploadImage', { imageBase64: resultado.base64, mimeType:'image/png', fileName:'capa-ajustada-'+Date.now()+'.png' });
-  if(!subida.ok){ showToast('No se pudo guardar la imagen ajustada'); if(btn){btn.disabled=false;btn.textContent='💾 Guardar ajuste';} return; }
-  p.FotoGeneradaURL = subida.url;
-  p.FotoURL = subida.url;
-  p.BBoxJSON = JSON.stringify(resultado.bboxPct);
-  await apiPost('saveRow', { table:'PRENDAS', row:p });
-  // La prenda que acaba de quedar bien se vuelve el molde de su tipo: el
-  // rectángulo que ocupa AHORA es exactamente lo que queremos que ocupen
-  // las próximas playeras / faldas largas / botas, etc.
-  const chk = document.getElementById('ajustarGuardarMolde');
-  const clave = claveMoldeParaPrenda(p.Categoria, p.Tipo);
-  let guardoMolde = false;
-  if(chk && chk.checked && clave){
-    const base = moldeBase(clave);
-    MOLDES_USUARIO[clave] = reglaDesdeBbox(resultado.bboxPct, base.regla.vAlign);
-    guardarMoldesUsuario();
-    guardoMolde = true;
-  }
-  localStorage.setItem('ropa_data_cache', JSON.stringify(DATA));
-  renderCatalogo();
-  refrescarFotoModal(p);
-  refrescarVestidorDOM();
-  renderCapasLista();
-  const overlay = document.getElementById('ajustarManiquiOverlay');
-  if(overlay) overlay.remove();
-  ajusteManiqui = null;
-  if(guardoMolde){
-    const otras = prendasDelMolde(clave).filter(x=>x.ID!==p.ID).length;
-    showToast('Molde de "'+moldeBase(clave).nombre+'" guardado'+(otras?' — puedes re-alinear las otras '+otras+' en Perfil → Moldes':''));
-  } else {
-    showToast('Ajuste guardado');
+  // Red de seguridad: un error inesperado aquí (no solo de red) dejaba
+  // el botón "Guardando…" pegado para siempre sin aviso.
+  try{
+    const fileId = fileIdDeUrlDrive(p.FotoGeneradaURL);
+    if(!fileId){ showToast('No se pudo identificar la capa actual'); if(btn){btn.disabled=false;btn.textContent='💾 Guardar ajuste';} return; }
+    const r = await apiPost('descargarImagenDrive', { fileId });
+    if(!r.ok){ showToast('No se pudo cargar la capa: '+(r.error||'sin conexión')); if(btn){btn.disabled=false;btn.textContent='💾 Guardar ajuste';} return; }
+    const resultado = await aplicarAjusteManual('data:'+r.mimeType+';base64,'+r.base64, { dx, dy, sx, sy });
+    if(!resultado){ showToast('No se pudo aplicar el ajuste'); if(btn){btn.disabled=false;btn.textContent='💾 Guardar ajuste';} return; }
+    const subida = await apiPost('uploadImage', { imageBase64: resultado.base64, mimeType:'image/png', fileName:'capa-ajustada-'+Date.now()+'.png' });
+    if(!subida.ok){ showToast('No se pudo guardar la imagen ajustada'); if(btn){btn.disabled=false;btn.textContent='💾 Guardar ajuste';} return; }
+    p.FotoGeneradaURL = subida.url;
+    p.FotoURL = subida.url;
+    p.BBoxJSON = JSON.stringify(resultado.bboxPct);
+    await apiPost('saveRow', { table:'PRENDAS', row:p });
+    // La prenda que acaba de quedar bien se vuelve el molde de su tipo: el
+    // rectángulo que ocupa AHORA es exactamente lo que queremos que ocupen
+    // las próximas playeras / faldas largas / botas, etc.
+    const chk = document.getElementById('ajustarGuardarMolde');
+    const clave = claveMoldeParaPrenda(p.Categoria, p.Tipo);
+    let guardoMolde = false;
+    if(chk && chk.checked && clave){
+      const base = moldeBase(clave);
+      MOLDES_USUARIO[clave] = reglaDesdeBbox(resultado.bboxPct, base.regla.vAlign);
+      guardarMoldesUsuario();
+      guardoMolde = true;
+    }
+    localStorage.setItem('ropa_data_cache', JSON.stringify(DATA));
+    renderCatalogo();
+    refrescarFotoModal(p);
+    refrescarVestidorDOM();
+    renderCapasLista();
+    const overlay = document.getElementById('ajustarManiquiOverlay');
+    if(overlay) overlay.remove();
+    ajusteManiqui = null;
+    if(guardoMolde){
+      const otras = prendasDelMolde(clave).filter(x=>x.ID!==p.ID).length;
+      showToast('Molde de "'+moldeBase(clave).nombre+'" guardado'+(otras?' — puedes re-alinear las otras '+otras+' en Perfil → Moldes':''));
+    } else {
+      showToast('Ajuste guardado');
+    }
+  }catch(e){
+    showToast('Algo falló guardando ('+(e.message||'error inesperado')+') — intenta de nuevo');
+    if(btn){ btn.disabled = false; btn.textContent = '💾 Guardar ajuste'; }
   }
 }
 function fileIdDeUrlDrive(url){
