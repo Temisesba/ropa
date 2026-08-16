@@ -354,7 +354,7 @@ let SHEET_URL = '';
 // Nombre-landmark de esta versión — cámbialo en cada cambio que se
 // despliegue, así se puede saber a simple vista (en Perfil) si el
 // celular ya está viendo lo último o una copia vieja en caché.
-const BUILD_VERSION = 'Coba';
+const BUILD_VERSION = 'Ek Balam';
 let DATA = { prendas: [], usos: [], outfits_sugeridos: [], perfil: [], fotos_origen: [] };
 let showTrash = false;
 let soloFavoritos = false;
@@ -872,7 +872,7 @@ async function analizarFotoRecortada(recortada, origenUrlExistente){
       <button class="btn" onclick="reintentarFoto()">Reintentar</button>`;
     return;
   }
-  currentDetections = { ...recortada, modelo: r.modelo, motivoFallback: r.motivoFallback, origenUrlExistente, items: (r.items||[]).map(it=>({ ...it, incluir:true })) };
+  currentDetections = { ...recortada, modelo: r.modelo, motivoFallback: r.motivoFallback, origenUrlExistente, fechaFoto: hoyYMD(), items: (r.items||[]).map(it=>({ ...it, incluir:true })) };
   document.getElementById('reviewArea').innerHTML = '<p class="hint">Recortando cada prenda…</p>';
   await prepararRecortes(currentDetections);
   renderRevisionFoto();
@@ -2651,17 +2651,28 @@ async function abrirBorrador(p){
     const pts = Array.from(punteros.values());
     return Math.hypot(pts[0].x-pts[1].x, pts[0].y-pts[1].y);
   };
+  let punteroActivo = null;
   canvas.addEventListener('pointerdown', e=>{
     punteros.set(e.pointerId, { x:e.clientX, y:e.clientY });
     canvas.setPointerCapture(e.pointerId);
+    if(activo){
+      // Ya hay un trazo en curso (incluye el lazo a medio dibujar) — un
+      // segundo dedo que roza la pantalla sin querer (palma, pulgar al
+      // sostener el cel) NO debe cancelarlo ni convertirlo en paneo, o el
+      // trazo se corta a medias y el siguiente toque empieza uno nuevo
+      // desde otro punto (se sentía como que "se desvía"). Se ignora
+      // hasta que se suelte.
+      return;
+    }
     if(punteros.size>=2){
-      // Dos dedos: cancela cualquier trazo que se hubiera empezado con el
-      // primer dedo y pasa a modo paneo + pellizcar para zoom.
-      activo = false;
+      // Dos dedos desde el inicio (ninguno dibujando todavía): paneo real
+      // + pellizcar para zoom.
+      punteroActivo = null;
       ctx.clearRect(0,0,canvas.width,canvas.height); ctx.drawImage(buffer,0,0);
       panActivo = { centro: centroide(), scrollLeft: scrollWrap.scrollLeft, scrollTop: scrollWrap.scrollTop, distInicial: distanciaEntreDedos(), zoomInicial: Number(zoomSlider.value) };
       return;
     }
+    punteroActivo = e.pointerId;
     const pos = posEnCanvas(e);
     if(modo==='varita'){
       guardarHistorial();
@@ -2714,7 +2725,7 @@ async function abrirBorrador(p){
       scrollWrap.scrollTop = panActivo.scrollTop - (c.y - panActivo.centro.y);
       return;
     }
-    if(!activo) return;
+    if(!activo || e.pointerId !== punteroActivo) return;
     const pos = posEnCanvas(e);
     if(modo==='ovalo' || modo==='rectangulo'){
       ultimo = pos;
@@ -2741,8 +2752,9 @@ async function abrirBorrador(p){
   const soltarPuntero = e=>{
     punteros.delete(e.pointerId);
     if(punteros.size<2) panActivo = null;
-    if(!activo) return;
+    if(!activo || e.pointerId !== punteroActivo) return;
     activo = false;
+    punteroActivo = null;
     // Por si quedó un redibujo de rAF pendiente del último pointermove
     // (con una vista previa vieja de figura/línea/lazo) — que no
     // sobrescriba lo que se dibuja aquí al soltar.
@@ -2750,7 +2762,14 @@ async function abrirBorrador(p){
     if(modo==='lazo' && lazoEstadoActual==='dibujando'){
       if(lazoPuntos.length>=3){
         lazoEstadoActual = 'lista';
-        dibujarLazoPreview(true);
+        // Dibujar directo aquí (en vez de vía pedirRedibujo) se veía bien
+        // un instante y luego desaparecía: el último pointermove ya había
+        // encolado un frame de rAF pendiente que, al dispararse justo
+        // después, repintaba SOLO el buffer (dibujarExtra ya estaba en
+        // null) y borraba este contorno. Pasando por pedirRedibujo, ese
+        // mismo frame pendiente recoge el nuevo dibujarExtra en vez de
+        // perderlo.
+        pedirRedibujo(()=> dibujarLazoPreview(true));
         lazoAcciones.style.display = '';
         lazoEstadoTxt.textContent = '¿Qué quieres hacer con la selección?';
       } else {
@@ -3975,7 +3994,9 @@ function renderGaleria(indice){
 // Slides de "Fotos subidas" (Perfil): todas las fotos activas (sin
 // papelera), para poder deslizar entre ellas desde cualquier miniatura.
 function abrirGaleriaFotosSubidas(indice){
-  const slides = DATA.fotos_origen.filter(f=>!esVerdadero(f.Papelera))
+  // Mismo orden (más nueva primero) que renderFotosSubidas, o el índice
+  // que le pasa cada miniatura ya no apuntaría a la foto correcta.
+  const slides = DATA.fotos_origen.filter(f=>!esVerdadero(f.Papelera)).slice().reverse()
     .map(f=>`<img src="${f.URL}" style="max-width:100%;max-height:80vh;border-radius:var(--radius);display:block;margin:0 auto">`);
   abrirGaleria(slides, indice||0);
 }
@@ -4056,7 +4077,7 @@ function editarPrendasDeUso(usoId){
   let ids = []; try{ ids = JSON.parse(u.PrendaIDsJSON||'[]'); }catch(e){}
   outfitBoardGuardado = outfitBoard;
   usoEnEdicion = u;
-  outfitBoard = { capas: ids.filter(id=>findPrenda(id)), peloIndice: 0 };
+  outfitBoard = { capas: ids.filter(id=>findPrenda(id)), peloIndice: Number(u.PeloIndice)||0 };
   // Si el Vestidor real ya se abrió antes en esta sesión, deja su propio
   // #vestidorPreview/#capasListaOutfit ocultos en el DOM (nunca se
   // destruyen al cambiar de pestaña). getElementById siempre regresa el
@@ -4106,6 +4127,7 @@ async function cerrarEditarUso(guardar){
     let idsViejos = []; try{ idsViejos = JSON.parse(u.PrendaIDsJSON||'[]'); }catch(e){}
     const nuevosIds = outfitBoard.capas.filter(id=>findPrenda(id));
     u.PrendaIDsJSON = JSON.stringify(nuevosIds);
+    u.PeloIndice = outfitBoard.peloIndice||0;
     await apiPost('saveRow', { table:'USOS', row:u });
     const agregados = nuevosIds.filter(id=>!idsViejos.includes(id));
     for(const id of agregados){
@@ -4969,7 +4991,10 @@ function prendasDeLaFoto(url){
 }
 function renderFotosSubidas(){
   const cont = document.getElementById('fotosSubidasArea');
-  const activas = DATA.fotos_origen.filter(f=>!esVerdadero(f.Papelera));
+  // Más nueva primero — las filas nuevas se agregan al final en el
+  // Sheet, así que invertir el orden de llegada basta (no depende de
+  // Fecha, que la usuaria puede editar/atrasar libremente).
+  const activas = DATA.fotos_origen.filter(f=>!esVerdadero(f.Papelera)).slice().reverse();
   if(!activas.length){ cont.innerHTML = '<p class="hint">Todavía no hay fotos de origen guardadas.</p>'; return; }
   cont.innerHTML = activas.map((f,i)=>{
     const prendas = prendasDeLaFoto(f.URL);
