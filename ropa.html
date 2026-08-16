@@ -354,7 +354,7 @@ let SHEET_URL = '';
 // Nombre-landmark de esta versión — cámbialo en cada cambio que se
 // despliegue, así se puede saber a simple vista (en Perfil) si el
 // celular ya está viendo lo último o una copia vieja en caché.
-const BUILD_VERSION = 'Ek Balam';
+const BUILD_VERSION = 'Kohunlich';
 let DATA = { prendas: [], usos: [], outfits_sugeridos: [], perfil: [], fotos_origen: [] };
 let showTrash = false;
 let soloFavoritos = false;
@@ -2319,12 +2319,18 @@ async function abrirMarcarZona(p){
     showToast('Zona marcada — dale "🔄 Regenerar" para aplicarla');
   };
 }
-// Borrador manual: pinta transparencia directo sobre la capa ya generada,
-// sin usar IA — el usuario decide exactamente qué desaparece. Dos modos:
-// trazo libre (como Paint) y óvalo (arrastra una esquina a la otra) para
-// curvas limpias como el hueco del cuello, que a mano alzada salen
-// irregulares. Nada se sube a Drive hasta "💾 Guardar".
-async function abrirBorrador(p){
+// Editor de imagen de una prenda — una sola pantalla con dos pestañas:
+// "✋ Ajustar posición" (mover/escalar la capa completa, sin tocar
+// píxeles) y "🧽 Borrador" (pintar transparencia a mano, sin IA). Antes
+// eran dos modales separados que había que cerrar uno para abrir el
+// otro — pedido explícito: "en una misma pantalla de editar podamos
+// ajustar a maniquí y tener todo lo de borrador". Comparten el MISMO
+// lienzo ya cargado: al cambiar de "Ajustar" a "Borrador" (o al
+// Guardar) el movimiento/escala se hornea de una vez en los píxeles del
+// buffer (hornearAjusteEnBuffer) para que el borrador trabaje sobre la
+// posición ya corregida, y "💾 Guardar" sube todo junto (posición + lo
+// borrado) en una sola imagen — nada se sube a Drive antes de eso.
+async function abrirEditorPrenda(p, tabInicial){
   if(!p.FotoGeneradaURL){ showToast('Esta prenda todavía no tiene una foto generada'); return; }
   const fileId = fileIdDeUrlDrive(p.FotoGeneradaURL);
   if(!fileId){ showToast('No se pudo identificar la foto generada'); return; }
@@ -2336,51 +2342,76 @@ async function abrirBorrador(p){
   const cargada = new Promise((resolve,reject)=>{ img.onload=resolve; img.onerror=reject; });
   img.src = 'data:'+r.mimeType+';base64,'+r.base64;
   await cargada;
+  const moldeClave = claveMoldeParaPrenda(p.Categoria, p.Tipo);
   const overlay = document.createElement('div');
   overlay.className = 'modal-overlay';
   overlay.innerHTML = `<div class="modal">
-    <h3>Borrador</h3>
-    <p class="hint">Pinta encima para borrar esa parte (queda transparente) — se ve sobre el maniquí para que sepas exactamente qué falta quitar. Sin IA, tú decides.</p>
-    <div class="chips" style="justify-content:center;flex-wrap:wrap;overflow:visible">
-      <button class="chip active" id="modoLibre">✏️ Trazo libre</button>
-      <button class="chip" id="modoLinea">／ Línea recta</button>
-      <button class="chip" id="modoOvalo">⭕ Óvalo</button>
-      <button class="chip" id="modoRect">▭ Rectángulo</button>
-      <button class="chip" id="modoVarita">🪄 Varita (clic y selecciona)</button>
-      <button class="chip" id="modoClonar">🧵 Clonar (traer tela)</button>
-      <button class="chip" id="modoLazo">➰ Selección (forma libre)</button>
+    <h3>Editar imagen</h3>
+    <div class="chips" style="justify-content:center">
+      <button class="chip" id="tabAjustar">✋ Ajustar posición</button>
+      <button class="chip" id="tabBorrador">🧽 Borrador</button>
     </div>
-    <p class="hint" style="text-align:center;margin-top:4px" id="clonEstado"></p>
-    <p class="hint" style="text-align:center;margin-top:4px" id="lazoEstado"></p>
-    <div class="chips" id="lazoAcciones" style="display:none;justify-content:center;margin-top:4px">
-      <button class="chip" id="lazoBorrar">✓ Borrar</button>
-      <button class="chip" id="lazoMover">🤚 Mover</button>
-      <button class="chip" id="lazoLlenar" title="Rellena con el color de la tela que está justo alrededor">🎨 Llenar</button>
-      <button class="chip" id="lazoCancelar">✗ Cancelar</button>
-    </div>
-    <p class="hint" style="text-align:center;margin-top:4px">📌 Con dos dedos te mueves por la imagen sin borrar nada</p>
-    <div class="chips" style="justify-content:center;margin-top:6px">
-      <button class="chip" id="borradorManiquiArriba" title="Pon el maniquí encima: lo que se sigue viendo alrededor es el sobrante, bórralo">🧍 Maniquí encima</button>
-    </div>
-    <p class="hint" style="text-align:center;margin-top:2px" id="borradorManiquiHint"></p>
     <div id="borradorScrollWrap" style="max-width:280px;max-height:55vh;overflow:auto;margin:10px auto 0;border-radius:10px;border:1px solid var(--border)">
       <div class="maniqui-doll-wrap" id="borradorWrap" style="max-width:none;margin:0">
         ${maniquiInfo.html}
         <canvas id="borradorCanvas" style="position:absolute;inset:0;width:100%;height:100%;touch-action:none"></canvas>
       </div>
     </div>
-    <p class="hint" style="text-align:center;margin-top:8px">🔍 Zoom (para cortes finos)</p>
+    <p class="hint" style="text-align:center;margin-top:8px">🔍 Zoom (para cortes finos) · 📌 Con dos dedos te mueves sin editar nada</p>
     <input type="range" id="borradorZoom" min="100" max="500" value="100" style="width:100%">
-    <p class="hint" style="text-align:center;margin-top:8px" id="borradorGrosorLabel">Grosor del borrador</p>
-    <input type="range" id="borradorGrosor" min="1" max="60" value="12" style="width:100%">
-    <div class="chips" style="justify-content:center;margin-top:6px">
-      <button class="chip" id="borradorDeshacer">↩ Deshacer trazo</button>
-      <button class="chip" id="borradorReiniciar">↺ Reiniciar todo</button>
-      <button class="chip" id="borradorNuevaFuente" style="display:none">🎯 Elegir otra fuente</button>
+
+    <div id="panelAjustar">
+      <p class="hint" style="text-align:center;margin-top:6px">Arrastra la imagen para moverla; usa los deslizadores para estirarla — ancho y alto son independientes, no hace falta que sea proporcional.</p>
+      <div class="chips" style="justify-content:center;margin-top:6px">
+        <button class="chip" id="ajEscalaMenos">➖ Más chica</button>
+        <button class="chip" id="ajEscalaMas">➕ Más grande</button>
+        <button class="chip" id="ajReset">↺ Reiniciar</button>
+      </div>
+      <p class="hint" id="ajAnchoTxt" style="text-align:center;margin-top:8px">↔️ Ancho: 100%</p>
+      <input type="range" id="ajAnchoSlider" min="30" max="300" step="1" value="100" style="width:100%">
+      <p class="hint" id="ajAltoTxt" style="text-align:center;margin-top:8px">↕️ Alto: 100%</p>
+      <input type="range" id="ajAltoSlider" min="30" max="300" step="1" value="100" style="width:100%">
+      ${moldeClave ? `<label class="hint" style="display:flex;gap:8px;align-items:flex-start;margin-top:12px;background:var(--accent-soft);padding:10px;border-radius:10px;cursor:pointer">
+        <input type="checkbox" id="ajGuardarMolde" checked style="width:auto;margin-top:2px">
+        <span>Guardar esto como el <b>molde de "${escAttr(moldeBase(moldeClave).nombre)}"</b> — todas las prendas nuevas de este tipo van a caer justo aquí, sin volver a ajustarlas.</span>
+      </label>` : `<p class="hint" style="margin-top:12px">Este ajuste se guarda solo en esta prenda (su tipo no coincide con ningún molde; puedes editar los moldes en Perfil).</p>`}
     </div>
+
+    <div id="panelBorrador" style="display:none">
+      <p class="hint" style="text-align:center;margin-top:6px">Pinta encima para borrar esa parte (queda transparente) — se ve sobre el maniquí para que sepas exactamente qué falta quitar. Sin IA, tú decides.</p>
+      <div class="chips" style="justify-content:center;flex-wrap:wrap;overflow:visible;margin-top:6px">
+        <button class="chip active" id="modoLibre">✏️ Trazo libre</button>
+        <button class="chip" id="modoLinea">／ Línea recta</button>
+        <button class="chip" id="modoOvalo">⭕ Óvalo</button>
+        <button class="chip" id="modoRect">▭ Rectángulo</button>
+        <button class="chip" id="modoVarita">🪄 Varita (clic y selecciona)</button>
+        <button class="chip" id="modoClonar">🧵 Clonar (traer tela)</button>
+        <button class="chip" id="modoLazo">➰ Selección (forma libre)</button>
+      </div>
+      <p class="hint" style="text-align:center;margin-top:4px" id="clonEstado"></p>
+      <p class="hint" style="text-align:center;margin-top:4px" id="lazoEstado"></p>
+      <div class="chips" id="lazoAcciones" style="display:none;justify-content:center;margin-top:4px">
+        <button class="chip" id="lazoBorrar">✓ Borrar</button>
+        <button class="chip" id="lazoMover">🤚 Mover</button>
+        <button class="chip" id="lazoLlenar" title="Rellena con el color de la tela que está justo alrededor">🎨 Llenar</button>
+        <button class="chip" id="lazoCancelar">✗ Cancelar</button>
+      </div>
+      <div class="chips" style="justify-content:center;margin-top:6px">
+        <button class="chip" id="borradorManiquiArriba" title="Pon el maniquí encima: lo que se sigue viendo alrededor es el sobrante, bórralo">🧍 Maniquí encima</button>
+      </div>
+      <p class="hint" style="text-align:center;margin-top:2px" id="borradorManiquiHint"></p>
+      <p class="hint" style="text-align:center;margin-top:8px" id="borradorGrosorLabel">Grosor del borrador</p>
+      <input type="range" id="borradorGrosor" min="1" max="60" value="12" style="width:100%">
+      <div class="chips" style="justify-content:center;margin-top:6px">
+        <button class="chip" id="borradorDeshacer">↩ Deshacer trazo</button>
+        <button class="chip" id="borradorReiniciar">↺ Reiniciar todo</button>
+        <button class="chip" id="borradorNuevaFuente" style="display:none">🎯 Elegir otra fuente</button>
+      </div>
+    </div>
+
     <div class="actions">
-      <button class="btn ghost" id="borradorCancelar">Cancelar</button>
-      <button class="btn" id="borradorGuardar">💾 Guardar</button>
+      <button class="btn ghost" id="editorCancelar">Cancelar</button>
+      <button class="btn" id="editorGuardar">💾 Guardar</button>
     </div>
   </div>`;
   document.body.appendChild(overlay);
@@ -2388,9 +2419,9 @@ async function abrirBorrador(p){
   wrap.style.width = '280px';
   // El maniquí nunca debe "atrapar" el clic/toque, ni estando encima ni
   // debajo — es puro papel calca visual, el lienzo de abajo es lo único
-  // que dibuja/borra. Sin esto, con "Maniquí encima" activo, la imagen
-  // del maniquí (su rectángulo completo, no solo donde se ve el cuerpo)
-  // bloquearía el borrador justo donde más se necesita usarlo.
+  // que dibuja/borra/mueve. Sin esto, con "Maniquí encima" activo, la
+  // imagen del maniquí (su rectángulo completo, no solo donde se ve el
+  // cuerpo) bloquearía el borrador justo donde más se necesita usarlo.
   wrap.querySelectorAll('.maniqui-doll-base, .maniqui-pelo').forEach(el=> el.style.pointerEvents = 'none');
   const canvas = document.getElementById('borradorCanvas');
   canvas.width = img.naturalWidth; canvas.height = img.naturalHeight;
@@ -2402,12 +2433,59 @@ async function abrirBorrador(p){
   const bctx = buffer.getContext('2d');
   bctx.drawImage(img, 0, 0);
   // Pila de deshacer: una copia del buffer justo ANTES de cada trazo/figura/
-  // varita confirmada — "Deshacer" solo repone la última, no borra todo de un jalón.
+  // varita/ajuste-de-posición confirmado — "Deshacer" solo repone la
+  // última, no borra todo de un jalón.
   let historial = [];
   const guardarHistorial = ()=>{
     historial.push(bctx.getImageData(0,0,buffer.width,buffer.height));
     if(historial.length>25) historial.shift();
   };
+
+  // ---- Pestaña "Ajustar posición" ----
+  // Mueve/escala TODO el lienzo vía CSS transform sobre el propio canvas
+  // (vista previa instantánea, sin tocar píxeles todavía) — se "hornea"
+  // de verdad en el buffer (aplicarAjusteManual, el mismo cálculo que ya
+  // usaba el Ajustar viejo) al cambiar a la pestaña Borrador o al
+  // Guardar, para que lo que se pinte/borre después quede sobre la
+  // posición ya corregida.
+  let ajusteVal = { dx:0, dy:0, sx:1, sy:1 };
+  let ajusteInicio = null;
+  // El checkbox de "guardar como molde" vive en el DOM desde el inicio
+  // (aunque se abra directo en la pestaña Borrador) — sin esto, borrar
+  // algo y guardar SIN haber tocado nunca "Ajustar posición" actualizaría
+  // el molde igual solo porque el checkbox nace marcado, cosa que la
+  // versión vieja (dos pantallas separadas) nunca hacía.
+  let seAjustoPosicion = false;
+  function aplicarTransformAjuste(){
+    canvas.style.transform = `translate(${ajusteVal.dx}%, ${ajusteVal.dy}%) scale(${ajusteVal.sx}, ${ajusteVal.sy})`;
+    const anchoSlider = document.getElementById('ajAnchoSlider'), anchoTxt = document.getElementById('ajAnchoTxt');
+    const altoSlider = document.getElementById('ajAltoSlider'), altoTxt = document.getElementById('ajAltoTxt');
+    const pctAncho = Math.round(ajusteVal.sx*100), pctAlto = Math.round(ajusteVal.sy*100);
+    if(anchoSlider) anchoSlider.value = pctAncho;
+    if(anchoTxt) anchoTxt.textContent = '↔️ Ancho: '+pctAncho+'%';
+    if(altoSlider) altoSlider.value = pctAlto;
+    if(altoTxt) altoTxt.textContent = '↕️ Alto: '+pctAlto+'%';
+  }
+  async function hornearAjusteEnBuffer(){
+    if(!ajusteVal.dx && !ajusteVal.dy && ajusteVal.sx===1 && ajusteVal.sy===1) return;
+    guardarHistorial();
+    const resultado = await aplicarAjusteManual(buffer.toDataURL('image/png'), ajusteVal);
+    if(resultado){
+      const nueva = new Image();
+      await new Promise(res=>{ nueva.onload=res; nueva.src=resultado.dataUrl; });
+      bctx.clearRect(0,0,buffer.width,buffer.height);
+      bctx.drawImage(nueva,0,0);
+    }
+    ajusteVal = { dx:0, dy:0, sx:1, sy:1 };
+    canvas.style.transform = '';
+    ctx.clearRect(0,0,canvas.width,canvas.height); ctx.drawImage(buffer,0,0);
+  }
+  document.getElementById('ajEscalaMenos').onclick = ()=>{ ajusteVal.sx=Math.max(0.3,Math.min(3,ajusteVal.sx-0.05)); ajusteVal.sy=Math.max(0.3,Math.min(3,ajusteVal.sy-0.05)); seAjustoPosicion=true; aplicarTransformAjuste(); };
+  document.getElementById('ajEscalaMas').onclick = ()=>{ ajusteVal.sx=Math.max(0.3,Math.min(3,ajusteVal.sx+0.05)); ajusteVal.sy=Math.max(0.3,Math.min(3,ajusteVal.sy+0.05)); seAjustoPosicion=true; aplicarTransformAjuste(); };
+  document.getElementById('ajReset').onclick = ()=>{ ajusteVal = { dx:0, dy:0, sx:1, sy:1 }; seAjustoPosicion=false; aplicarTransformAjuste(); };
+  document.getElementById('ajAnchoSlider').oninput = e=>{ ajusteVal.sx = Math.max(0.3, Math.min(3, Number(e.target.value)/100)); seAjustoPosicion=true; aplicarTransformAjuste(); };
+  document.getElementById('ajAltoSlider').oninput = e=>{ ajusteVal.sy = Math.max(0.3, Math.min(3, Number(e.target.value)/100)); seAjustoPosicion=true; aplicarTransformAjuste(); };
+
   let modo = 'libre', grosor = 12, activo = false, inicio = null, ultimo = null;
   let fuenteClon = null, fuenteSnap = null, clonInicio = null;
   // Selección de lazo (forma libre): "dibujando" mientras se traza el
@@ -2638,7 +2716,8 @@ async function abrirBorrador(p){
   // solo dedo no había forma de desplazarse sin borrar algo sin querer
   // (no hay mouse en el celular). "touch-action:none" en el canvas ya
   // bloquea el paneo nativo del navegador (lo necesita para dibujar con
-  // un dedo), así que el paneo con dos dedos se maneja a mano aquí.
+  // un dedo), así que el paneo con dos dedos se maneja a mano aquí —
+  // disponible en las dos pestañas.
   const scrollWrap = document.getElementById('borradorScrollWrap');
   const zoomSlider = document.getElementById('borradorZoom');
   const punteros = new Map();
@@ -2651,10 +2730,50 @@ async function abrirBorrador(p){
     const pts = Array.from(punteros.values());
     return Math.hypot(pts[0].x-pts[1].x, pts[0].y-pts[1].y);
   };
+
+  // ---- Pestañas ----
+  // Cambiar entre "Ajustar" y "Borrador" sin cerrar nada — pedido
+  // explícito. Al salir de "Ajustar" se hornea el movimiento en el
+  // buffer para que el borrador (y el guardado final) trabajen sobre la
+  // posición ya corregida.
+  let tabActual = tabInicial==='borrador' ? 'borrador' : 'ajustar';
+  const tabAjustarBtn = document.getElementById('tabAjustar'), tabBorradorBtn = document.getElementById('tabBorrador');
+  const panelAjustar = document.getElementById('panelAjustar'), panelBorrador = document.getElementById('panelBorrador');
+  function mostrarTab(t){
+    if(t==='borrador' && tabActual==='ajustar') hornearAjusteEnBuffer();
+    tabActual = t;
+    tabAjustarBtn.classList.toggle('active', t==='ajustar');
+    tabBorradorBtn.classList.toggle('active', t==='borrador');
+    panelAjustar.style.display = t==='ajustar' ? '' : 'none';
+    panelBorrador.style.display = t==='borrador' ? '' : 'none';
+    canvas.style.cursor = t==='ajustar' ? 'grab' : '';
+  }
+  tabAjustarBtn.onclick = ()=> mostrarTab('ajustar');
+  tabBorradorBtn.onclick = ()=> mostrarTab('borrador');
+  mostrarTab(tabActual);
+
+  // ---- Puntero del lienzo: una sola pareja de listeners que se
+  // comportan distinto según la pestaña activa (arrastrar-para-mover en
+  // Ajustar, dibujar/borrar en Borrador) — comparten el mismo mapa de
+  // dedos (punteros) para que el paneo con dos dedos funcione igual en
+  // ambas.
   let punteroActivo = null;
   canvas.addEventListener('pointerdown', e=>{
     punteros.set(e.pointerId, { x:e.clientX, y:e.clientY });
     canvas.setPointerCapture(e.pointerId);
+    if(punteros.size>=2){
+      // Dos dedos desde el inicio: paneo real + pellizcar para zoom,
+      // sin importar la pestaña.
+      activo = false; ajusteInicio = null;
+      ctx.clearRect(0,0,canvas.width,canvas.height); ctx.drawImage(buffer,0,0);
+      panActivo = { centro: centroide(), scrollLeft: scrollWrap.scrollLeft, scrollTop: scrollWrap.scrollTop, distInicial: distanciaEntreDedos(), zoomInicial: Number(zoomSlider.value) };
+      return;
+    }
+    if(tabActual==='ajustar'){
+      ajusteInicio = { x:e.clientX, y:e.clientY, dx:ajusteVal.dx, dy:ajusteVal.dy };
+      canvas.style.cursor = 'grabbing';
+      return;
+    }
     if(activo){
       // Ya hay un trazo en curso (incluye el lazo a medio dibujar) — un
       // segundo dedo que roza la pantalla sin querer (palma, pulgar al
@@ -2662,14 +2781,6 @@ async function abrirBorrador(p){
       // trazo se corta a medias y el siguiente toque empieza uno nuevo
       // desde otro punto (se sentía como que "se desvía"). Se ignora
       // hasta que se suelte.
-      return;
-    }
-    if(punteros.size>=2){
-      // Dos dedos desde el inicio (ninguno dibujando todavía): paneo real
-      // + pellizcar para zoom.
-      punteroActivo = null;
-      ctx.clearRect(0,0,canvas.width,canvas.height); ctx.drawImage(buffer,0,0);
-      panActivo = { centro: centroide(), scrollLeft: scrollWrap.scrollLeft, scrollTop: scrollWrap.scrollTop, distInicial: distanciaEntreDedos(), zoomInicial: Number(zoomSlider.value) };
       return;
     }
     punteroActivo = e.pointerId;
@@ -2725,6 +2836,15 @@ async function abrirBorrador(p){
       scrollWrap.scrollTop = panActivo.scrollTop - (c.y - panActivo.centro.y);
       return;
     }
+    if(tabActual==='ajustar'){
+      if(!ajusteInicio) return;
+      const rect = wrap.getBoundingClientRect();
+      ajusteVal.dx = ajusteInicio.dx + (e.clientX-ajusteInicio.x)/rect.width*100;
+      ajusteVal.dy = ajusteInicio.dy + (e.clientY-ajusteInicio.y)/rect.height*100;
+      seAjustoPosicion = true;
+      aplicarTransformAjuste();
+      return;
+    }
     if(!activo || e.pointerId !== punteroActivo) return;
     const pos = posEnCanvas(e);
     if(modo==='ovalo' || modo==='rectangulo'){
@@ -2752,6 +2872,7 @@ async function abrirBorrador(p){
   const soltarPuntero = e=>{
     punteros.delete(e.pointerId);
     if(punteros.size<2) panActivo = null;
+    if(tabActual==='ajustar'){ ajusteInicio = null; canvas.style.cursor = 'grab'; return; }
     if(!activo || e.pointerId !== punteroActivo) return;
     activo = false;
     punteroActivo = null;
@@ -2840,296 +2961,60 @@ async function abrirBorrador(p){
   document.getElementById('borradorReiniciar').onclick = ()=>{
     historial = [];
     cancelarLazo();
-    bctx.clearRect(0,0,canvas.width,canvas.height); bctx.drawImage(img,0,0);
+    bctx.clearRect(0,0,buffer.width,buffer.height); bctx.drawImage(img,0,0);
     ctx.clearRect(0,0,canvas.width,canvas.height); ctx.drawImage(buffer,0,0);
   };
-  document.getElementById('borradorCancelar').onclick = ()=> overlay.remove();
-  document.getElementById('borradorGuardar').onclick = async ()=>{
-    const btn = document.getElementById('borradorGuardar');
+  document.getElementById('editorCancelar').onclick = ()=> overlay.remove();
+  document.getElementById('editorGuardar').onclick = async ()=>{
+    const btn = document.getElementById('editorGuardar');
     btn.disabled = true; btn.textContent = 'Guardando…';
     // Red de seguridad: un error inesperado aquí (no solo de red) dejaba
     // el botón "Guardando…" pegado para siempre sin aviso.
     try{
+      await hornearAjusteEnBuffer();
       const dataUrl = buffer.toDataURL('image/png');
       const bboxPct = escanearBboxAlfa(bctx, buffer.width, buffer.height);
-      const subida = await apiPost('uploadImage', { imageBase64: dataUrl.split(',')[1], mimeType:'image/png', fileName:'capa-borrada-'+Date.now()+'.png' });
+      const subida = await apiPost('uploadImage', { imageBase64: dataUrl.split(',')[1], mimeType:'image/png', fileName:'capa-editada-'+Date.now()+'.png' });
       if(!subida.ok){ showToast('No se pudo guardar: '+(subida.error||'sin conexión')); btn.disabled=false; btn.textContent='💾 Guardar'; return; }
       p.FotoGeneradaURL = subida.url;
       p.FotoURL = subida.url;
       p.BBoxJSON = JSON.stringify(bboxPct);
       await apiPost('saveRow', { table:'PRENDAS', row:p });
+      // La prenda que acaba de quedar bien se vuelve el molde de su tipo:
+      // el rectángulo que ocupa AHORA es exactamente lo que queremos que
+      // ocupen las próximas playeras / faldas largas / botas, etc.
+      const chk = document.getElementById('ajGuardarMolde');
+      let guardoMolde = false;
+      if(chk && chk.checked && moldeClave && seAjustoPosicion){
+        const base = moldeBase(moldeClave);
+        MOLDES_USUARIO[moldeClave] = reglaDesdeBbox(bboxPct, base.regla.vAlign);
+        guardarMoldesUsuario();
+        guardoMolde = true;
+      }
       guardarCacheLocal();
       renderCatalogo();
       refrescarVestidorDOM();
       renderCapasLista();
       overlay.remove();
       refrescarFotoModal(p);
-      showToast('Guardado');
+      if(guardoMolde){
+        const otras = prendasDelMolde(moldeClave).filter(x=>x.ID!==p.ID).length;
+        showToast('Guardado — molde de "'+moldeBase(moldeClave).nombre+'" actualizado'+(otras?' (puedes re-alinear las otras '+otras+' en Perfil → Moldes)':''));
+      } else {
+        showToast('Guardado');
+      }
     }catch(e){
       showToast('Algo falló guardando ('+(e.message||'error inesperado')+') — intenta de nuevo');
       btn.disabled = false; btn.textContent = '💾 Guardar';
     }
   };
 }
-// Muestra el resultado de la IA como PROPUESTA, sin guardarlo todavía —
-// el usuario decide si lo usa o lo descarta y se queda con la foto de
-// antes (pedido explícito: "si no le doy guardar que no se guarde").
-function mostrarPreviewCandidata(p, candidata){
-  const cont = document.getElementById('edPreviewCandidata');
-  if(!cont) return;
-  cont.innerHTML = `<p class="hint" style="margin-top:10px">Propuesta nueva — ¿la usamos?</p>
-    <img src="${candidata.url}" style="width:100%;max-width:220px;margin:0 auto;display:block;border-radius:12px;background:var(--accent-soft)">
-    <div class="chips" style="justify-content:center;margin-top:8px">
-      <button class="chip" id="edUsarCandidata">✅ Usar esta</button>
-      <button class="chip" id="edDescartarCandidata">✖ Descartar</button>
-    </div>`;
-  document.getElementById('edUsarCandidata').onclick = async ()=>{
-    await aplicarCapaCandidata(p, candidata);
-    cont.innerHTML = '';
-    refrescarFotoModal(p);
-    showToast('Guardado');
-  };
-  document.getElementById('edDescartarCandidata').onclick = ()=>{
-    cont.innerHTML = '';
-    showToast('Descartado — se queda la foto de antes');
-  };
-}
-// Aplica y persiste una capa candidata ya generada (subida a Drive, sin
-// tocar aún la prenda) — el "guardar" real de la propuesta.
-async function aplicarCapaCandidata(p, candidata){
-  p.FotoGeneradaURL = candidata.url;
-  p.FotoURL = candidata.url;
-  p.BBoxJSON = JSON.stringify(candidata.bboxPct);
-  p.ClaveColor = candidata.claveTexto;
-  await apiPost('saveRow', { table:'PRENDAS', row:p });
-  guardarCacheLocal();
-  renderCatalogo();
-  refrescarVestidorDOM();
-  renderCapasLista();
-}
-// Compartido por "🔄 Regenerar" y por recortar-y-regenerar (confirmarRecorteEdicion)
-// — corre el pipeline completo de capa nueva (color clave + generarCapaPrenda
-// + quitarFondoColor) sobre una imagen que ya se tiene en memoria como dataURL.
-// Sube el resultado a Drive (para poder mostrarlo como preview) pero NO lo
-// guarda todavía en la prenda — eso lo hace aplicarCapaCandidata, aparte.
-async function generarCapaCandidata(p, dataUrl, feedback, btn, textoBtnNormal, marca){
-  const clave = await elegirColorClave(dataUrl);
-  const genero = localStorage.getItem('ropa_maniqui_genero')||'mujer';
-  const maniqui = await obtenerManiquiBase(genero);
-  if(!maniqui){ showToast('No se pudo preparar el maniquí'); return null; }
-  const gen = await apiPost('generarCapaPrenda', {
-    imageBase64: dataUrl.split(',')[1], mimeType:'image/jpeg',
-    categoria: p.Categoria, tipo: p.Tipo, color: p.Color, colorSecundario: p.ColorSecundario, estampado: p.Estampado,
-    maniquiBase64: maniqui.base64, maniquiMimeType: maniqui.mimeType,
-    claveColorHex: clave.hex, claveColorNombre: clave.nombre, feedback,
-    marcaBase64: marca?marca.base64:undefined, marcaMimeType: marca?marca.mimeType:undefined, marcaInstruccion: marca?marca.instruccion:undefined
-  });
-  if(!gen.ok){ showToast('No se pudo generar: '+(gen.error||'')); return null; }
-  const recorte = await quitarFondoColor('data:'+(gen.mimeType||'image/jpeg')+';base64,'+gen.imageBase64, clave.hex);
-  if(!capaEsValida(recorte, p.Categoria)){
-    showToast('El resultado no quedó bien (fondo mal quitado o chocó con la prenda) — intenta de nuevo');
-    return null;
-  }
-  const reposicionada = await reposicionarCapa(recorte.dataUrl, recorte.bboxPct, p.Categoria, p.Tipo);
-  const final = reposicionada || recorte;
-  const subGen = await apiPost('uploadImage', { imageBase64: final.base64, mimeType:'image/png', fileName:'capa-'+Date.now()+'.png' });
-  if(!subGen.ok){ showToast('No se pudo guardar la imagen generada'); return null; }
-  return { url: subGen.url, bboxPct: final.bboxPct, claveTexto: clave.nombre+' '+clave.hex };
-}
-// Menú rápido desde el Vestidor: ajustar, borrador, molde y editar, sin
-// tener que entrar primero a "Editar prenda" — pedido explícito para no
-// perder tiempo navegando cuando ya estás viendo el outfit armado.
-function abrirAccionesPrenda(p){
-  if(!p) return;
-  const clave = claveMoldeParaPrenda(p.Categoria, p.Tipo);
-  const overlay = document.createElement('div');
-  overlay.className = 'modal-overlay';
-  overlay.innerHTML = `<div class="modal">
-    <h3>${escAttr(p.Tipo||p.Categoria)}</h3>
-    <div class="chips" style="flex-direction:column;align-items:stretch;overflow:visible">
-      <button class="btn ghost" id="accAjustar">✋ Ajustar en maniquí</button>
-      <button class="btn ghost" id="accBorrador">🧽 Borrador</button>
-      ${clave?`<button class="btn ghost" id="accMolde">📐 Aplicar molde de "${escAttr(moldeBase(clave).nombre)}"</button>`:''}
-      <button class="btn ghost" id="accEditar">✏️ Editar prenda (más opciones)</button>
-    </div>
-    <div class="actions"><button class="btn ghost" id="accCerrar">Cerrar</button></div>
-  </div>`;
-  document.body.appendChild(overlay);
-  overlay.addEventListener('click', e=>{ if(e.target===overlay) overlay.remove(); });
-  overlay.querySelector('#accCerrar').onclick = ()=> overlay.remove();
-  overlay.querySelector('#accAjustar').onclick = ()=>{ overlay.remove(); abrirAjustarManiqui(p); };
-  overlay.querySelector('#accBorrador').onclick = ()=>{ overlay.remove(); abrirBorrador(p); };
-  if(clave){
-    overlay.querySelector('#accMolde').onclick = async ()=>{
-      overlay.remove();
-      const ok = await realinearPrendaAMolde(p, reglaMolde(clave));
-      if(!ok){ showToast('No se pudo aplicar el molde (revisa la conexión)'); return; }
-      guardarCacheLocal();
-      renderCatalogo();
-      refrescarVestidorDOM();
-      renderCapasLista();
-      showToast('Puesta en el molde de "'+moldeBase(clave).nombre+'"');
-    };
-  }
-  overlay.querySelector('#accEditar').onclick = ()=>{ overlay.remove(); abrirEditarPrenda(p.ID); };
-}
-// "✋ Ajustar en maniquí" — corrección fina manual sobre lo que puso el
-// sistema de anclas automático (ver reposicionarCapa). Arrastrar/escalar
-// es puro CSS (instantáneo, sin tocar el archivo); solo al guardar se
-// aplica el mismo ajuste sobre la capa real (aplicarAjusteManual) y se
-// sube un PNG 720x1280 nuevo — el ajuste queda guardado en esa prenda,
-// no hay que repetirlo cada vez que se arma un outfit.
-let ajusteManiqui = null;
-async function abrirAjustarManiqui(p){
-  if(!p.FotoGeneradaURL){ showToast('Esta prenda todavía no tiene una capa para ajustar'); return; }
-  const genero = localStorage.getItem('ropa_maniqui_genero')||'mujer';
-  ajusteManiqui = { p, dx:0, dy:0, sx:1, sy:1 };
-  const moldeClaveAjuste = claveMoldeParaPrenda(p.Categoria, p.Tipo);
-  const overlay = document.createElement('div');
-  overlay.className = 'modal-overlay';
-  overlay.id = 'ajustarManiquiOverlay';
-  overlay.innerHTML = `<div class="modal">
-    <h3>Ajustar en el maniquí</h3>
-    <p class="hint">Arrastra la prenda para moverla; usa los deslizadores para estirarla — ancho y alto son independientes, no hace falta que sea proporcional.</p>
-    <div class="maniqui-doll-wrap" id="ajustarWrap" style="max-width:240px"><p class="hint" style="padding:60px 0;text-align:center">Cargando…</p></div>
-    <div class="chips" style="justify-content:center;margin-top:10px">
-      <button class="chip" onclick="ajustarManiquiEscala(-0.05)">➖ Más chica</button>
-      <button class="chip" onclick="ajustarManiquiEscala(0.05)">➕ Más grande</button>
-      <button class="chip" onclick="ajustarManiquiReset()">↺ Reiniciar</button>
-    </div>
-    <p class="hint" id="ajustarAnchoTxt" style="text-align:center;margin-top:8px">↔️ Ancho: 100%</p>
-    <input type="range" id="ajustarAnchoSlider" min="30" max="300" step="1" value="100" style="width:100%" oninput="ajustarManiquiAnchoSlider(this.value)">
-    <p class="hint" id="ajustarAltoTxt" style="text-align:center;margin-top:8px">↕️ Alto: 100%</p>
-    <input type="range" id="ajustarAltoSlider" min="30" max="300" step="1" value="100" style="width:100%" oninput="ajustarManiquiAltoSlider(this.value)">
-    ${moldeClaveAjuste ? `<label class="hint" style="display:flex;gap:8px;align-items:flex-start;margin-top:12px;background:var(--accent-soft);padding:10px;border-radius:10px;cursor:pointer">
-      <input type="checkbox" id="ajustarGuardarMolde" checked style="width:auto;margin-top:2px">
-      <span>Guardar esto como el <b>molde de "${escAttr(moldeBase(moldeClaveAjuste).nombre)}"</b> — todas las prendas nuevas de este tipo van a caer justo aquí, sin volver a ajustarlas.</span>
-    </label>` : `<p class="hint" style="margin-top:12px">Este ajuste se guarda solo en esta prenda (su tipo no coincide con ningún molde; puedes editar los moldes en Perfil).</p>`}
-    <div class="actions">
-      <button class="btn ghost" id="ajustarCancelar">Cancelar</button>
-      <button class="btn" id="ajustarGuardar">💾 Guardar ajuste</button>
-    </div>
-  </div>`;
-  document.body.appendChild(overlay);
-  overlay.addEventListener('click', e=>{ if(e.target===overlay){ overlay.remove(); ajusteManiqui=null; } });
-  overlay.querySelector('#ajustarCancelar').onclick = ()=>{ overlay.remove(); ajusteManiqui=null; };
-  overlay.querySelector('#ajustarGuardar').onclick = guardarAjusteManiqui;
-  const maniquiInfo = await maniquiConPeinadoHtml(genero, true);
-  const wrap = document.getElementById('ajustarWrap');
-  if(!wrap) return; // el usuario ya cerró el modal mientras cargaba
-  if(!maniquiInfo.cuerpo){ wrap.innerHTML = '<p class="hint">No se pudo cargar el maniquí.</p>'; return; }
-  wrap.innerHTML = maniquiInfo.html +
-    `<img class="maniqui-doll-capa-full" id="ajustarImg" src="${p.FotoGeneradaURL}" style="cursor:grab;touch-action:none">`;
-  aplicarTransformAjuste();
-  const img = document.getElementById('ajustarImg');
-  let inicio = null;
-  img.addEventListener('pointerdown', e=>{
-    inicio = { x:e.clientX, y:e.clientY, dx:ajusteManiqui.dx, dy:ajusteManiqui.dy };
-    img.setPointerCapture(e.pointerId);
-    img.style.cursor = 'grabbing';
-  });
-  img.addEventListener('pointermove', e=>{
-    if(!inicio || !ajusteManiqui) return;
-    const rect = wrap.getBoundingClientRect();
-    ajusteManiqui.dx = inicio.dx + (e.clientX-inicio.x)/rect.width*100;
-    ajusteManiqui.dy = inicio.dy + (e.clientY-inicio.y)/rect.height*100;
-    aplicarTransformAjuste();
-  });
-  img.addEventListener('pointerup', ()=>{ inicio=null; if(img) img.style.cursor='grab'; });
-}
-function aplicarTransformAjuste(){
-  const img = document.getElementById('ajustarImg');
-  if(!img || !ajusteManiqui) return;
-  img.style.transform = `translate(${ajusteManiqui.dx}%, ${ajusteManiqui.dy}%) scale(${ajusteManiqui.sx}, ${ajusteManiqui.sy})`;
-  const anchoSlider = document.getElementById('ajustarAnchoSlider');
-  const anchoTxt = document.getElementById('ajustarAnchoTxt');
-  const altoSlider = document.getElementById('ajustarAltoSlider');
-  const altoTxt = document.getElementById('ajustarAltoTxt');
-  const pctAncho = Math.round(ajusteManiqui.sx*100), pctAlto = Math.round(ajusteManiqui.sy*100);
-  if(anchoSlider) anchoSlider.value = pctAncho;
-  if(anchoTxt) anchoTxt.textContent = '↔️ Ancho: '+pctAncho+'%';
-  if(altoSlider) altoSlider.value = pctAlto;
-  if(altoTxt) altoTxt.textContent = '↕️ Alto: '+pctAlto+'%';
-}
-// ➖/➕ mueven ancho y alto JUNTOS (atajo proporcional, sigue siendo el
-// caso más común); los deslizadores de abajo permiten estirar cada uno
-// por separado — pedido explícito: "jalar poquito por aquí, poquito por
-// allá", que no sea proporcional.
-function ajustarManiquiEscala(delta){
-  if(!ajusteManiqui) return;
-  ajusteManiqui.sx = Math.max(0.3, Math.min(3, ajusteManiqui.sx+delta));
-  ajusteManiqui.sy = Math.max(0.3, Math.min(3, ajusteManiqui.sy+delta));
-  aplicarTransformAjuste();
-}
-// Los deslizadores permiten llegar a un punto intermedio exacto — los
-// botones ➖/➕ saltan de 5 en 5% y a veces ese paso se pasa de largo de
-// donde se quería quedar (reportado: "se va muy allá o muy acá").
-function ajustarManiquiAnchoSlider(valor){
-  if(!ajusteManiqui) return;
-  ajusteManiqui.sx = Math.max(0.3, Math.min(3, Number(valor)/100));
-  aplicarTransformAjuste();
-}
-function ajustarManiquiAltoSlider(valor){
-  if(!ajusteManiqui) return;
-  ajusteManiqui.sy = Math.max(0.3, Math.min(3, Number(valor)/100));
-  aplicarTransformAjuste();
-}
-function ajustarManiquiReset(){
-  if(!ajusteManiqui) return;
-  ajusteManiqui.dx=0; ajusteManiqui.dy=0; ajusteManiqui.sx=1; ajusteManiqui.sy=1;
-  aplicarTransformAjuste();
-}
-async function guardarAjusteManiqui(){
-  if(!ajusteManiqui) return;
-  const { p, dx, dy, sx, sy } = ajusteManiqui;
-  const btn = document.getElementById('ajustarGuardar');
-  if(btn){ btn.disabled=true; btn.textContent='Guardando…'; }
-  // Red de seguridad: un error inesperado aquí (no solo de red) dejaba
-  // el botón "Guardando…" pegado para siempre sin aviso.
-  try{
-    const fileId = fileIdDeUrlDrive(p.FotoGeneradaURL);
-    if(!fileId){ showToast('No se pudo identificar la capa actual'); if(btn){btn.disabled=false;btn.textContent='💾 Guardar ajuste';} return; }
-    const r = await apiPost('descargarImagenDrive', { fileId });
-    if(!r.ok){ showToast('No se pudo cargar la capa: '+(r.error||'sin conexión')); if(btn){btn.disabled=false;btn.textContent='💾 Guardar ajuste';} return; }
-    const resultado = await aplicarAjusteManual('data:'+r.mimeType+';base64,'+r.base64, { dx, dy, sx, sy });
-    if(!resultado){ showToast('No se pudo aplicar el ajuste'); if(btn){btn.disabled=false;btn.textContent='💾 Guardar ajuste';} return; }
-    const subida = await apiPost('uploadImage', { imageBase64: resultado.base64, mimeType:'image/png', fileName:'capa-ajustada-'+Date.now()+'.png' });
-    if(!subida.ok){ showToast('No se pudo guardar la imagen ajustada'); if(btn){btn.disabled=false;btn.textContent='💾 Guardar ajuste';} return; }
-    p.FotoGeneradaURL = subida.url;
-    p.FotoURL = subida.url;
-    p.BBoxJSON = JSON.stringify(resultado.bboxPct);
-    await apiPost('saveRow', { table:'PRENDAS', row:p });
-    // La prenda que acaba de quedar bien se vuelve el molde de su tipo: el
-    // rectángulo que ocupa AHORA es exactamente lo que queremos que ocupen
-    // las próximas playeras / faldas largas / botas, etc.
-    const chk = document.getElementById('ajustarGuardarMolde');
-    const clave = claveMoldeParaPrenda(p.Categoria, p.Tipo);
-    let guardoMolde = false;
-    if(chk && chk.checked && clave){
-      const base = moldeBase(clave);
-      MOLDES_USUARIO[clave] = reglaDesdeBbox(resultado.bboxPct, base.regla.vAlign);
-      guardarMoldesUsuario();
-      guardoMolde = true;
-    }
-    guardarCacheLocal();
-    renderCatalogo();
-    refrescarFotoModal(p);
-    refrescarVestidorDOM();
-    renderCapasLista();
-    const overlay = document.getElementById('ajustarManiquiOverlay');
-    if(overlay) overlay.remove();
-    ajusteManiqui = null;
-    if(guardoMolde){
-      const otras = prendasDelMolde(clave).filter(x=>x.ID!==p.ID).length;
-      showToast('Molde de "'+moldeBase(clave).nombre+'" guardado'+(otras?' — puedes re-alinear las otras '+otras+' en Perfil → Moldes':''));
-    } else {
-      showToast('Ajuste guardado');
-    }
-  }catch(e){
-    showToast('Algo falló guardando ('+(e.message||'error inesperado')+') — intenta de nuevo');
-    if(btn){ btn.disabled = false; btn.textContent = '💾 Guardar ajuste'; }
-  }
-}
+// Antes eran dos pantallas separadas (había que cerrar una para abrir
+// la otra) — ahora las dos son la misma, solo cambia la pestaña inicial
+// con la que abre. Se dejan estos dos nombres para no tocar sus varios
+// puntos de entrada (menú de acciones, Editar prenda).
+async function abrirBorrador(p){ return abrirEditorPrenda(p, 'borrador'); }
+async function abrirAjustarManiqui(p){ return abrirEditorPrenda(p, 'ajustar'); }
 function fileIdDeUrlDrive(url){
   const m = String(url||'').match(/[?&]id=([^&]+)/);
   return m ? m[1] : '';
