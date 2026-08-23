@@ -354,7 +354,7 @@ let SHEET_URL = '';
 // Nombre-landmark de esta versión — cámbialo en cada cambio que se
 // despliegue, así se puede saber a simple vista (en Perfil) si el
 // celular ya está viendo lo último o una copia vieja en caché.
-const BUILD_VERSION = 'Muyil';
+const BUILD_VERSION = 'Tulum 2';
 let DATA = { prendas: [], usos: [], outfits_sugeridos: [], perfil: [], fotos_origen: [] };
 let showTrash = false;
 let soloFavoritos = false;
@@ -814,30 +814,37 @@ function moverCapaResumenLote(id, delta){
   renderResumenLoteManiqui();
 }
 // Registra el día usado con el orden ya acomodado — mismo criterio que
-// editar un día desde Calendario. Si procesar las fotos de este lote ya
-// creó una sola fila de USOS (fecha puesta por foto), se ACTUALIZA esa
-// misma fila (evita duplicarla); si no había ninguna (nunca se puso
-// fecha) o hubo más de una (fotos con fechas distintas ya registradas
-// por separado), se crea una fila nueva con todo el lote junto.
+// editar un día desde Calendario, y la MISMA fecha que "carga" (no un
+// campo aparte): si al procesar cada foto de este lote ya se puso una
+// fecha, ya se creó su propia fila de USOS por cada una — aquí se
+// consolidan TODAS en una sola (la primera se actualiza con el lote
+// completo, las demás se borran) para que no quede el mismo outfit
+// repetido en días distintos solo por no haber tocado nada aquí. La
+// fecha es opcional, igual que en "carga" — no se obliga a ponerla.
 async function guardarOrdenResumenLote(){
   const fechaInput = document.getElementById('resumenLoteFecha');
   const valorFecha = fechaInput ? fechaInput.value : '';
-  if(!valorFecha){ showToast('Elige una fecha'); return; }
   const btn = document.getElementById('resumenLoteGuardar');
   if(btn){ btn.disabled = true; btn.textContent = 'Guardando…'; }
   try{
-    const fecha = new Date(valorFecha).toISOString();
+    const fecha = valorFecha ? new Date(valorFecha).toISOString() : undefined;
     const idsFinal = [...ordenResumenLote, ...prendasDeEsteLote.filter(id=>!ordenResumenLote.includes(id))];
-    if(usosDeEsteLote.length===1){
+    if(usosDeEsteLote.length){
       const u = usosDeEsteLote[0];
       u.PrendaIDsJSON = JSON.stringify(idsFinal);
-      u.Fecha = fecha;
+      if(fecha) u.Fecha = fecha;
       await apiPost('saveRow', { table:'USOS', row:u });
+      for(let i=1;i<usosDeEsteLote.length;i++){
+        const extra = usosDeEsteLote[i];
+        DATA.usos = DATA.usos.filter(x=>x.ID!==extra.ID);
+        await apiPost('deleteRow', { table:'USOS', id:extra.ID });
+      }
+      usosDeEsteLote = [u];
     } else {
       const r = await apiPost('registrarUso', { prendaIds: idsFinal, fecha });
       if(r.ok){ DATA.usos.push(r.uso); usosDeEsteLote = [r.uso]; }
     }
-    idsFinal.forEach(id=>{ const p=findPrenda(id); if(p) p.UltimoUso=fecha; });
+    if(fecha) idsFinal.forEach(id=>{ const p=findPrenda(id); if(p) p.UltimoUso=fecha; });
     guardarCacheLocal();
     renderCalendario();
     showToast('Guardado en el historial');
@@ -2441,6 +2448,10 @@ async function abrirEditorPrenda(p, tabInicial){
       <button class="chip" id="lazoLlenar" title="Rellena con el color de la tela que está justo alrededor">🎨 Llenar</button>
       <button class="chip" id="lazoCancelar">✗ Cancelar</button>
     </div>
+    <div class="chips" style="justify-content:center;margin-top:6px">
+      <button class="chip" id="borradorDeshacer">↩ Deshacer trazo</button>
+      <button class="chip" id="borradorReiniciar">↺ Reiniciar todo</button>
+    </div>
 
     <div id="panelAjustar">
       ${moldeClave ? `<div class="chips" style="justify-content:center;margin-top:6px">
@@ -2479,8 +2490,6 @@ async function abrirEditorPrenda(p, tabInicial){
       <p class="hint" style="text-align:center;margin-top:8px" id="borradorGrosorLabel">Grosor del borrador</p>
       <input type="range" id="borradorGrosor" min="1" max="60" value="12" style="width:100%">
       <div class="chips" style="justify-content:center;margin-top:6px">
-        <button class="chip" id="borradorDeshacer">↩ Deshacer trazo</button>
-        <button class="chip" id="borradorReiniciar">↺ Reiniciar todo</button>
         <button class="chip" id="borradorNuevaFuente" style="display:none">🎯 Elegir otra fuente</button>
       </div>
     </div>
@@ -3081,6 +3090,8 @@ async function abrirEditorPrenda(p, tabInicial){
   document.getElementById('borradorReiniciar').onclick = ()=>{
     historial = [];
     cancelarLazo();
+    ajusteVal = { dx:0, dy:0, sx:1, sy:1 };
+    canvas.style.transform = '';
     bctx.clearRect(0,0,buffer.width,buffer.height); bctx.drawImage(img,0,0);
     ctx.clearRect(0,0,canvas.width,canvas.height); ctx.drawImage(buffer,0,0);
   };
