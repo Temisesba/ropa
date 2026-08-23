@@ -354,8 +354,8 @@ let SHEET_URL = '';
 // Nombre-landmark de esta versión — cámbialo en cada cambio que se
 // despliegue, así se puede saber a simple vista (en Perfil) si el
 // celular ya está viendo lo último o una copia vieja en caché.
-const BUILD_VERSION = 'Isla Mujeres 2';
-let DATA = { prendas: [], usos: [], outfits_sugeridos: [], perfil: [], fotos_origen: [] };
+const BUILD_VERSION = 'Merida 3';
+let DATA = { prendas: [], usos: [], outfits_sugeridos: [], perfil: [], fotos_origen: [], maniqui_base: [] };
 let showTrash = false;
 let soloFavoritos = false;
 let activeCategoria = 'Todas';
@@ -530,7 +530,7 @@ function guardarCacheLocal(){
   catch(e){ console.warn('No se pudo guardar el caché local (almacenamiento lleno):', e); }
 }
 function normalizeData(d){
-  return { prendas: d.prendas||[], usos: d.usos||[], outfits_sugeridos: d.outfits_sugeridos||[], perfil: d.perfil||[], fotos_origen: d.fotos_origen||[] };
+  return { prendas: d.prendas||[], usos: d.usos||[], outfits_sugeridos: d.outfits_sugeridos||[], perfil: d.perfil||[], fotos_origen: d.fotos_origen||[], maniqui_base: d.maniqui_base||[] };
 }
 
 function boot(){
@@ -4194,17 +4194,47 @@ async function mejorarOutfitConIA(prendaIds, areaId, btnId){
 // — pedido explícito: antes cada combinación con peinado regeneraba el
 // cuerpo completo desde cero, y como la IA no es determinista, el cuerpo
 // mismo (piel, proporciones) salía distinto entre una pestaña y otra.
-// Ahora el cuerpo queda fijo una sola vez por género+estatura.
+// Ahora el cuerpo queda fijo una sola vez por género+estatura — Y
+// COMPARTIDO entre dispositivos: antes se generaba por IA la primera
+// vez en CADA celular/compu por separado (cacheado solo en
+// localStorage), y como la IA no es determinista, cada dispositivo
+// sacaba un maniquí ligeramente distinto — la ropa se veía ajustada
+// diferente según desde dónde se viera. Pedido explícito: que sea
+// siempre el mismo, en todos los dispositivos (y para cualquier otra
+// persona conectada a este mismo backend). Ahora primero se busca en
+// `DATA.maniqui_base` (tabla del Sheet, la ve cualquiera que se
+// conecte) antes de generar uno nuevo; solo el dispositivo que lo
+// genera POR PRIMERA VEZ en todo el backend gasta la llamada a IA, el
+// resto lo reusa. Cache local (v4, bumpeado para que los ya generados
+// independientes antes de este cambio no se sigan usando) sigue
+// existiendo solo para no re-descargar en cada carga.
 async function obtenerManiquiBase(genero, estatura){
   estatura = estatura || localStorage.getItem('ropa_maniqui_estatura') || 'chaparrita';
-  const cacheKey = 'ropa_maniqui_base_v3_'+genero+'_'+estatura;
+  const cacheKey = 'ropa_maniqui_base_v4_'+genero+'_'+estatura;
   const cached = localStorage.getItem(cacheKey);
   if(cached){ try{ return JSON.parse(cached); }catch(e){} }
+  const compartido = DATA.maniqui_base.find(m=>m.Genero===genero && m.Estatura===estatura && m.URL);
+  if(compartido){
+    const fileId = fileIdDeUrlDrive(compartido.URL);
+    if(fileId){
+      const r = await apiPost('descargarImagenDrive', { fileId });
+      if(r.ok){
+        const info = { base64: r.base64, mimeType: r.mimeType||compartido.MimeType||'image/jpeg', url: compartido.URL };
+        try{ localStorage.setItem(cacheKey, JSON.stringify(info)); }catch(e){}
+        return info;
+      }
+    }
+  }
   const gen = await apiPost('generarManiquiBase', { genero, estatura });
   if(!gen.ok) return null;
   const subida = await apiPost('uploadImage', { imageBase64: gen.imageBase64, mimeType: gen.mimeType||'image/jpeg', fileName:'maniqui-'+genero+'-'+estatura+'.jpg' });
   const info = { base64: gen.imageBase64, mimeType: gen.mimeType||'image/jpeg', url: subida.ok?subida.url:'' };
   try{ localStorage.setItem(cacheKey, JSON.stringify(info)); }catch(e){}
+  if(subida.ok){
+    const fila = { Genero: genero, Estatura: estatura, URL: subida.url, MimeType: info.mimeType };
+    const r = await apiPost('saveRow', { table:'MANIQUI_BASE', row: fila });
+    if(r.ok){ DATA.maniqui_base.push(r.row); guardarCacheLocal(); }
+  }
   return info;
 }
 // El cabello: un addon aparte, generado en imagen a imagen usando el
@@ -4410,9 +4440,12 @@ function renderGaleria(indice){
 // Slides de "Fotos subidas" (Perfil): todas las fotos activas (sin
 // papelera), para poder deslizar entre ellas desde cualquier miniatura.
 function abrirGaleriaFotosSubidas(indice){
-  // Mismo orden (más nueva primero) que renderFotosSubidas, o el índice
-  // que le pasa cada miniatura ya no apuntaría a la foto correcta.
-  const slides = DATA.fotos_origen.filter(f=>!esVerdadero(f.Papelera)).slice().reverse()
+  // Mismo orden Y mismo deduplicado por URL que renderFotosSubidas, o el
+  // índice que le pasa cada miniatura ya no apuntaría a la foto correcta.
+  const vistos = new Set();
+  const slides = DATA.fotos_origen.filter(f=>!esVerdadero(f.Papelera))
+    .filter(f=> vistos.has(f.URL) ? false : (vistos.add(f.URL), true))
+    .slice().reverse()
     .map(f=>`<img src="${f.URL}" style="max-width:100%;max-height:80vh;border-radius:var(--radius);display:block;margin:0 auto">`);
   abrirGaleria(slides, indice||0);
 }
@@ -5410,7 +5443,14 @@ function renderFotosSubidas(){
   // Más nueva primero — las filas nuevas se agregan al final en el
   // Sheet, así que invertir el orden de llegada basta (no depende de
   // Fecha, que la usuaria puede editar/atrasar libremente).
-  const activas = DATA.fotos_origen.filter(f=>!esVerdadero(f.Papelera)).slice().reverse();
+  // Sin duplicar por URL: de una época antes del arreglo de papelera
+  // pudieron quedar dos filas distintas para la MISMA foto — mostrarlas
+  // separadas hacía parecer que "eliminar no funciona" (eliminabas una
+  // copia, la otra seguía apareciendo idéntica).
+  const vistos = new Set();
+  const activas = DATA.fotos_origen.filter(f=>!esVerdadero(f.Papelera))
+    .filter(f=> vistos.has(f.URL) ? false : (vistos.add(f.URL), true))
+    .slice().reverse();
   if(!activas.length){ cont.innerHTML = '<p class="hint">Todavía no hay fotos de origen guardadas.</p>'; return; }
   cont.innerHTML = activas.map((f,i)=>{
     const prendas = prendasDeLaFoto(f.URL);
@@ -5576,8 +5616,12 @@ function pedirEliminarFotoOrigen(url){
     // "eliminada" reapareciera sola al refrescar.
     // Optimista: se pinta de una vez (instantáneo), la red se dispara
     // después sin bloquear la pantalla.
-    const f = DATA.fotos_origen.find(x=>x.URL===url);
-    if(f) f.Papelera = true;
+    // Puede haber más de una fila con la misma URL (de una época antes
+    // del arreglo de papelera) — se mandan TODAS a la papelera de un
+    // jalón, si no, "eliminar" solo tapaba una copia y la foto seguía
+    // apareciendo (las demás copias, idénticas).
+    const filas = DATA.fotos_origen.filter(x=>x.URL===url);
+    filas.forEach(f=> f.Papelera = true);
     const afectadas = DATA.prendas.filter(p=>p.FotoOrigenURL===url);
     afectadas.forEach(p=> p.FotoOrigenURL = '');
     guardarCacheLocal();
@@ -5585,7 +5629,7 @@ function pedirEliminarFotoOrigen(url){
     showToast('Foto movida a la papelera');
     (async ()=>{
       for(const p of afectadas) await apiPost('saveRow', { table:'PRENDAS', row:p });
-      if(f) await apiPost('saveRow', { table:'FOTOS_ORIGEN', row:f });
+      for(const f of filas) await apiPost('saveRow', { table:'FOTOS_ORIGEN', row:f });
     })();
   });
 }
