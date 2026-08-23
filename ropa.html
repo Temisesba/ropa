@@ -354,7 +354,7 @@ let SHEET_URL = '';
 // Nombre-landmark de esta versión — cámbialo en cada cambio que se
 // despliegue, así se puede saber a simple vista (en Perfil) si el
 // celular ya está viendo lo último o una copia vieja en caché.
-const BUILD_VERSION = 'Cenote Azul 3';
+const BUILD_VERSION = 'Bacalar 3';
 let DATA = { prendas: [], usos: [], outfits_sugeridos: [], perfil: [], fotos_origen: [], maniqui_base: [] };
 let showTrash = false;
 let soloFavoritos = false;
@@ -2472,7 +2472,7 @@ async function abrirEditorPrenda(p, tabInicial){
       <p class="hint" style="text-align:center;margin-top:8px">↕️ Alto: <input type="number" id="ajAltoNum" value="100" min="30" max="300" style="width:58px;text-align:center;border:1px solid var(--border);border-radius:6px;padding:2px 4px;font:inherit">%</p>
       <input type="range" id="ajAltoSlider" min="30" max="300" step="1" value="100" style="width:100%">
       ${moldeClave ? `<label class="hint" style="display:flex;gap:8px;align-items:flex-start;margin-top:12px;background:var(--accent-soft);padding:10px;border-radius:10px;cursor:pointer">
-        <input type="checkbox" id="ajGuardarMolde" checked style="width:auto;margin-top:2px">
+        <input type="checkbox" id="ajGuardarMolde" style="width:auto;margin-top:2px">
         <span>Guardar esto como el <b>molde de "${escAttr(moldeBase(moldeClave).nombre)}"</b> — todas las prendas nuevas de este tipo van a caer justo aquí, sin volver a ajustarlas.</span>
       </label>` : `<p class="hint" style="margin-top:12px">Este ajuste se guarda solo en esta prenda (su tipo no coincide con ningún molde; puedes editar los moldes en Perfil).</p>`}
     </div>
