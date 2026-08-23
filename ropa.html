@@ -354,7 +354,7 @@ let SHEET_URL = '';
 // Nombre-landmark de esta versión — cámbialo en cada cambio que se
 // despliegue, así se puede saber a simple vista (en Perfil) si el
 // celular ya está viendo lo último o una copia vieja en caché.
-const BUILD_VERSION = 'Holbox 2';
+const BUILD_VERSION = 'Xel-Ha 2';
 let DATA = { prendas: [], usos: [], outfits_sugeridos: [], perfil: [], fotos_origen: [] };
 let showTrash = false;
 let soloFavoritos = false;
@@ -2874,9 +2874,18 @@ async function abrirEditorPrenda(p, tabInicial){
   function dibujarTrianguloWarp(ctxDestino, origen, s0,s1,s2, d0,d1,d2){
     const m = afinDesdeTriangulo(s0,s1,s2,d0,d1,d2);
     if(!m) return;
+    // El recorte (clip) de cada triángulo se dibuja un pelín MÁS GRANDE
+    // que su tamaño real (ampliado desde su propio centro) — el
+    // triángulo vecino queda pintado justo debajo, así que este
+    // sobrante lo tapa. Sin esto, el antialiasing del borde de cada
+    // clip deja una línea finita justo en la costura entre triángulos
+    // (visible como una rejilla tenue sobre la tela ya aplicada).
+    const cx = (d0.x+d1.x+d2.x)/3, cy = (d0.y+d1.y+d2.y)/3;
+    const ampliar = p=>({ x: cx+(p.x-cx)*1.04, y: cy+(p.y-cy)*1.04 });
+    const e0=ampliar(d0), e1=ampliar(d1), e2=ampliar(d2);
     ctxDestino.save();
     ctxDestino.beginPath();
-    ctxDestino.moveTo(d0.x,d0.y); ctxDestino.lineTo(d1.x,d1.y); ctxDestino.lineTo(d2.x,d2.y);
+    ctxDestino.moveTo(e0.x,e0.y); ctxDestino.lineTo(e1.x,e1.y); ctxDestino.lineTo(e2.x,e2.y);
     ctxDestino.closePath();
     ctxDestino.clip();
     ctxDestino.setTransform(m.a,m.b,m.c,m.d,m.e,m.f);
@@ -2924,7 +2933,7 @@ async function abrirEditorPrenda(p, tabInicial){
     for(let f=0; f<MALLA_FILAS; f++){
       for(let c=0; c<MALLA_COLS; c++){
         const el = document.createElement('div');
-        el.style.cssText = 'position:absolute;width:16px;height:16px;margin:-8px 0 0 -8px;border-radius:50%;background:#ff2d2d;border:2px solid #fff;box-shadow:0 0 3px rgba(0,0,0,.6);touch-action:none;cursor:grab';
+        el.style.cssText = 'position:absolute;width:11px;height:11px;margin:-5.5px 0 0 -5.5px;border-radius:50%;background:#ff2d2d;opacity:0.55;border:1.5px solid #fff;box-shadow:0 0 2px rgba(0,0,0,.6);touch-action:none;cursor:grab';
         posicionarPuntoMalla(el, f, c);
         cablearPuntoMalla(el, f, c);
         mallaOverlayEl.appendChild(el);
