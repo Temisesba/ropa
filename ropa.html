@@ -354,7 +354,7 @@ let SHEET_URL = '';
 // Nombre-landmark de esta versión — cámbialo en cada cambio que se
 // despliegue, así se puede saber a simple vista (en Perfil) si el
 // celular ya está viendo lo último o una copia vieja en caché.
-const BUILD_VERSION = 'Xcaret 2';
+const BUILD_VERSION = 'Isla Contoy 2';
 let DATA = { prendas: [], usos: [], outfits_sugeridos: [], perfil: [], fotos_origen: [] };
 let showTrash = false;
 let soloFavoritos = false;
@@ -2874,14 +2874,20 @@ async function abrirEditorPrenda(p, tabInicial){
   function dibujarTrianguloWarp(ctxDestino, origen, s0,s1,s2, d0,d1,d2){
     const m = afinDesdeTriangulo(s0,s1,s2,d0,d1,d2);
     if(!m) return;
-    // El recorte (clip) de cada triángulo se dibuja un pelín MÁS GRANDE
-    // que su tamaño real (ampliado desde su propio centro) — el
-    // triángulo vecino queda pintado justo debajo, así que este
-    // sobrante lo tapa. Sin esto, el antialiasing del borde de cada
-    // clip deja una línea finita justo en la costura entre triángulos
-    // (visible como una rejilla tenue sobre la tela ya aplicada).
+    // El recorte (clip) de cada triángulo se dibuja un poco MÁS GRANDE
+    // que su tamaño real — el triángulo vecino queda pintado debajo, así
+    // que este sobrante lo tapa y no se ve el antialiasing del borde del
+    // clip (la línea de costura). Tiene que ser una distancia FIJA en
+    // píxeles (no un % del tamaño del triángulo): el antialiasing mide
+    // más o menos lo mismo sin importar qué tan chico sea el triángulo,
+    // así que un % se queda corto justo en los triángulos chiquitos de
+    // la subdivisión fina (por eso seguía notándose después del primer
+    // intento con 4%).
     const cx = (d0.x+d1.x+d2.x)/3, cy = (d0.y+d1.y+d2.y)/3;
-    const ampliar = p=>({ x: cx+(p.x-cx)*1.04, y: cy+(p.y-cy)*1.04 });
+    const ampliar = p=>{
+      const dx=p.x-cx, dy=p.y-cy, dist=Math.hypot(dx,dy)||1, extra=1.2;
+      return { x: p.x+dx/dist*extra, y: p.y+dy/dist*extra };
+    };
     const e0=ampliar(d0), e1=ampliar(d1), e2=ampliar(d2);
     ctxDestino.save();
     ctxDestino.beginPath();
