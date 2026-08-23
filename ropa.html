@@ -354,7 +354,7 @@ let SHEET_URL = '';
 // Nombre-landmark de esta versión — cámbialo en cada cambio que se
 // despliegue, así se puede saber a simple vista (en Perfil) si el
 // celular ya está viendo lo último o una copia vieja en caché.
-const BUILD_VERSION = 'Tulum 2';
+const BUILD_VERSION = 'Palenque 2';
 let DATA = { prendas: [], usos: [], outfits_sugeridos: [], perfil: [], fotos_origen: [] };
 let showTrash = false;
 let soloFavoritos = false;
@@ -2437,10 +2437,16 @@ async function abrirEditorPrenda(p, tabInicial){
       <div class="maniqui-doll-wrap" id="borradorWrap" style="max-width:none;margin:0">
         ${maniquiInfo.html}
         <canvas id="borradorCanvas" style="position:absolute;inset:0;width:100%;height:100%;touch-action:none"></canvas>
+        <div id="mallaOverlay" style="position:absolute;inset:0;display:none"></div>
       </div>
     </div>
     <p class="hint" style="text-align:center;margin-top:8px">🔍 Zoom (para cortes finos) · 📌 Con dos dedos te mueves sin editar nada</p>
     <input type="range" id="borradorZoom" min="100" max="500" value="100" style="width:100%">
+    <p class="hint" style="text-align:center;margin-top:4px" id="mallaEstado"></p>
+    <div class="chips" id="mallaAcciones" style="display:none;justify-content:center;margin-top:4px">
+      <button class="chip" id="mallaAplicar">✓ Aplicar</button>
+      <button class="chip" id="mallaReiniciar">↺ Reiniciar cuadrícula</button>
+    </div>
     <p class="hint" style="text-align:center;margin-top:4px" id="lazoEstado"></p>
     <div class="chips" id="lazoAcciones" style="display:none;justify-content:center;margin-top:4px">
       <button class="chip" id="lazoBorrar">✓ Borrar</button>
@@ -2481,6 +2487,7 @@ async function abrirEditorPrenda(p, tabInicial){
         <button class="chip" id="modoVarita">🪄 Varita (clic y selecciona)</button>
         <button class="chip" id="modoClonar">🧵 Clonar (traer tela)</button>
         <button class="chip" id="modoLazo">➰ Selección (forma libre)</button>
+        <button class="chip" id="modoMalla" title="Cuadrícula de puntos: jala uno para estirar solo esa zona (ej. alargar solo la parte de abajo de una pierna)">🕸️ Malla (estirar zonas)</button>
       </div>
       <p class="hint" style="text-align:center;margin-top:4px" id="clonEstado"></p>
       <div class="chips" style="justify-content:center;margin-top:6px">
@@ -2631,18 +2638,20 @@ async function abrirEditorPrenda(p, tabInicial){
   }
   document.getElementById('borradorZoom').oninput = e=>{ wrap.style.width = (280*Number(e.target.value)/100)+'px'; };
   document.getElementById('borradorGrosor').oninput = e=> grosor = Number(e.target.value);
-  const botonesModo = { libre: document.getElementById('modoLibre'), linea: document.getElementById('modoLinea'), ovalo: document.getElementById('modoOvalo'), rectangulo: document.getElementById('modoRect'), varita: document.getElementById('modoVarita'), clonar: document.getElementById('modoClonar'), lazo: document.getElementById('modoLazo') };
+  const botonesModo = { libre: document.getElementById('modoLibre'), linea: document.getElementById('modoLinea'), ovalo: document.getElementById('modoOvalo'), rectangulo: document.getElementById('modoRect'), varita: document.getElementById('modoVarita'), clonar: document.getElementById('modoClonar'), lazo: document.getElementById('modoLazo'), malla: document.getElementById('modoMalla') };
   const grosorLabel = document.getElementById('borradorGrosorLabel'), grosorInput = document.getElementById('borradorGrosor');
   const clonEstado = document.getElementById('clonEstado'), btnNuevaFuente = document.getElementById('borradorNuevaFuente');
   function elegirModo(m){
+    if(modo==='malla' && m!=='malla') salirModoMalla();
     modo = m;
     Object.entries(botonesModo).forEach(([k,b])=> b.classList.toggle('active', k===m));
-    grosorLabel.style.display = (m==='varita'||m==='lazo') ? 'none' : '';
-    grosorInput.style.display = (m==='varita'||m==='lazo') ? 'none' : '';
+    grosorLabel.style.display = (m==='varita'||m==='lazo'||m==='malla') ? 'none' : '';
+    grosorInput.style.display = (m==='varita'||m==='lazo'||m==='malla') ? 'none' : '';
     fuenteClon = null; fuenteSnap = null;
     btnNuevaFuente.style.display = m==='clonar' ? '' : 'none';
     clonEstado.textContent = m==='clonar' ? 'Toca la parte de tela buena que quieres copiar' : '';
     cancelarLazo();
+    if(m==='malla') entrarModoMalla();
   }
   botonesModo.libre.onclick = ()=> elegirModo('libre');
   botonesModo.linea.onclick = ()=> elegirModo('linea');
@@ -2651,6 +2660,7 @@ async function abrirEditorPrenda(p, tabInicial){
   botonesModo.varita.onclick = ()=> elegirModo('varita');
   botonesModo.clonar.onclick = ()=> elegirModo('clonar');
   botonesModo.lazo.onclick = ()=>{ elegirModo('lazo'); lazoEstadoTxt.textContent = 'Dibuja el contorno de lo que quieres seleccionar'; };
+  botonesModo.malla.onclick = ()=> elegirModo('malla');
   btnNuevaFuente.onclick = ()=>{ fuenteClon = null; fuenteSnap = null; clonEstado.textContent = 'Toca la parte de tela buena que quieres copiar'; };
   // Pon el maniquí ENCIMA del recorte en vez de debajo, a modo de papel
   // calca — pedido explícito: poder elegir arriba/abajo, no que quede
@@ -2809,6 +2819,151 @@ async function abrirEditorPrenda(p, tabInicial){
     if(!n) return null;
     return `rgb(${Math.round(sr/n)},${Math.round(sg/n)},${Math.round(sb/n)})`;
   };
+  // "🕸️ Malla": cuadrícula de puntos arrastrables — jalar UNO estira solo
+  // la zona vecina, sin mover el resto (a diferencia de "✋ Ajustar
+  // posición", que mueve/escala TODA la imagen pareja). Pedido explícito:
+  // "que la prenda tenga múltiples puntos y yo pueda elegir cuáles
+  // jalar" para casos como una pierna que quedó corta solo por abajo.
+  // Técnica: warp por triángulos — cada celda de la cuadrícula se parte
+  // en 2 triángulos, y cada triángulo se dibuja con la transformación
+  // afín exacta que manda sus 3 puntos ORIGINALES a sus 3 puntos
+  // ACTUALES (fórmula estándar de "affine triangle warping" — un
+  // canvas.setTransform + drawImage recortado al triángulo). No es un
+  // liquify suave de verdad (eso necesita matemáticas más pesadas) — se
+  // nota "por bloques" cerca de las costuras de los triángulos, pero
+  // alcanza perfectamente para estirar una zona como en el pedido.
+  const MALLA_COLS = 5, MALLA_FILAS = 6;
+  let mallaOrigen = null, mallaPuntos = null, mallaArrastre = null, mallaRedibujoPendiente = false;
+  const mallaOverlayEl = document.getElementById('mallaOverlay');
+  const mallaEstadoTxt = document.getElementById('mallaEstado');
+  const mallaAccionesEl = document.getElementById('mallaAcciones');
+  function mallaIdentidad(){
+    const grid = [];
+    for(let f=0; f<MALLA_FILAS; f++){
+      const fila = [];
+      for(let c=0; c<MALLA_COLS; c++) fila.push({ x: c/(MALLA_COLS-1)*buffer.width, y: f/(MALLA_FILAS-1)*buffer.height });
+      grid.push(fila);
+    }
+    return grid;
+  }
+  function clonarMalla(grid){ return grid.map(fila=>fila.map(p=>({x:p.x,y:p.y}))); }
+  function afinDesdeTriangulo(s0,s1,s2,d0,d1,d2){
+    const denom = s0.x*(s1.y-s2.y) + s1.x*(s2.y-s0.y) + s2.x*(s0.y-s1.y);
+    if(!denom) return null;
+    return {
+      a: (d0.x*(s1.y-s2.y) + d1.x*(s2.y-s0.y) + d2.x*(s0.y-s1.y)) / denom,
+      b: (d0.y*(s1.y-s2.y) + d1.y*(s2.y-s0.y) + d2.y*(s0.y-s1.y)) / denom,
+      c: (d0.x*(s2.x-s1.x) + d1.x*(s0.x-s2.x) + d2.x*(s1.x-s0.x)) / denom,
+      d: (d0.y*(s2.x-s1.x) + d1.y*(s0.x-s2.x) + d2.y*(s1.x-s0.x)) / denom,
+      e: (d0.x*(s1.x*s2.y-s2.x*s1.y) + d1.x*(s2.x*s0.y-s0.x*s2.y) + d2.x*(s0.x*s1.y-s1.x*s0.y)) / denom,
+      f: (d0.y*(s1.x*s2.y-s2.x*s1.y) + d1.y*(s2.x*s0.y-s0.x*s2.y) + d2.y*(s0.x*s1.y-s1.x*s0.y)) / denom
+    };
+  }
+  function dibujarTrianguloWarp(ctxDestino, origen, s0,s1,s2, d0,d1,d2){
+    const m = afinDesdeTriangulo(s0,s1,s2,d0,d1,d2);
+    if(!m) return;
+    ctxDestino.save();
+    ctxDestino.beginPath();
+    ctxDestino.moveTo(d0.x,d0.y); ctxDestino.lineTo(d1.x,d1.y); ctxDestino.lineTo(d2.x,d2.y);
+    ctxDestino.closePath();
+    ctxDestino.clip();
+    ctxDestino.setTransform(m.a,m.b,m.c,m.d,m.e,m.f);
+    ctxDestino.drawImage(origen,0,0);
+    ctxDestino.setTransform(1,0,0,1,0,0);
+    ctxDestino.restore();
+  }
+  function dibujarMallaEn(ctxDestino){
+    for(let f=0; f<MALLA_FILAS-1; f++){
+      for(let c=0; c<MALLA_COLS-1; c++){
+        const s00=mallaOrigen[f][c], s01=mallaOrigen[f][c+1], s10=mallaOrigen[f+1][c], s11=mallaOrigen[f+1][c+1];
+        const d00=mallaPuntos[f][c], d01=mallaPuntos[f][c+1], d10=mallaPuntos[f+1][c], d11=mallaPuntos[f+1][c+1];
+        dibujarTrianguloWarp(ctxDestino, buffer, s00,s01,s10, d00,d01,d10);
+        dibujarTrianguloWarp(ctxDestino, buffer, s01,s11,s10, d01,d11,d10);
+      }
+    }
+  }
+  function posicionarPuntoMalla(el, f, c){
+    el.style.left = (mallaPuntos[f][c].x/buffer.width*100)+'%';
+    el.style.top = (mallaPuntos[f][c].y/buffer.height*100)+'%';
+  }
+  function cablearPuntoMalla(el, f, c){
+    el.addEventListener('pointerdown', e=>{
+      e.stopPropagation();
+      el.setPointerCapture(e.pointerId);
+      mallaArrastre = { pointerId: e.pointerId, f, c, inicioX: e.clientX, inicioY: e.clientY, origenX: mallaPuntos[f][c].x, origenY: mallaPuntos[f][c].y };
+      el.style.cursor = 'grabbing';
+    });
+    el.addEventListener('pointermove', e=>{
+      if(!mallaArrastre || mallaArrastre.pointerId!==e.pointerId || mallaArrastre.f!==f || mallaArrastre.c!==c) return;
+      e.stopPropagation();
+      const rect = wrap.getBoundingClientRect();
+      const dx = (e.clientX-mallaArrastre.inicioX)/rect.width*buffer.width;
+      const dy = (e.clientY-mallaArrastre.inicioY)/rect.height*buffer.height;
+      mallaPuntos[f][c] = { x: mallaArrastre.origenX+dx, y: mallaArrastre.origenY+dy };
+      posicionarPuntoMalla(el, f, c);
+      pedirRedibujoMalla();
+    });
+    const soltar = e=>{ if(mallaArrastre && mallaArrastre.pointerId===e.pointerId){ mallaArrastre=null; el.style.cursor='grab'; } };
+    el.addEventListener('pointerup', soltar);
+    el.addEventListener('pointercancel', soltar);
+  }
+  function dibujarPuntosMalla(){
+    mallaOverlayEl.innerHTML = '';
+    for(let f=0; f<MALLA_FILAS; f++){
+      for(let c=0; c<MALLA_COLS; c++){
+        const el = document.createElement('div');
+        el.style.cssText = 'position:absolute;width:16px;height:16px;margin:-8px 0 0 -8px;border-radius:50%;background:#ff2d2d;border:2px solid #fff;box-shadow:0 0 3px rgba(0,0,0,.6);touch-action:none;cursor:grab';
+        posicionarPuntoMalla(el, f, c);
+        cablearPuntoMalla(el, f, c);
+        mallaOverlayEl.appendChild(el);
+      }
+    }
+  }
+  function pedirRedibujoMalla(){
+    if(mallaRedibujoPendiente) return;
+    mallaRedibujoPendiente = true;
+    requestAnimationFrame(()=>{
+      mallaRedibujoPendiente = false;
+      ctx.clearRect(0,0,canvas.width,canvas.height);
+      dibujarMallaEn(ctx);
+    });
+  }
+  function entrarModoMalla(){
+    mallaOrigen = mallaIdentidad();
+    mallaPuntos = clonarMalla(mallaOrigen);
+    mallaOverlayEl.style.display = '';
+    mallaAccionesEl.style.display = '';
+    mallaEstadoTxt.textContent = 'Jala un punto para estirar esa zona — no se guarda hasta que toques ✓ Aplicar';
+    dibujarPuntosMalla();
+  }
+  function salirModoMalla(){
+    mallaOrigen = null; mallaPuntos = null; mallaArrastre = null;
+    mallaOverlayEl.innerHTML = '';
+    mallaOverlayEl.style.display = 'none';
+    mallaAccionesEl.style.display = 'none';
+    mallaEstadoTxt.textContent = '';
+    ctx.clearRect(0,0,canvas.width,canvas.height); ctx.drawImage(buffer,0,0);
+  }
+  document.getElementById('mallaReiniciar').onclick = ()=>{
+    if(!mallaOrigen) return;
+    mallaPuntos = clonarMalla(mallaOrigen);
+    dibujarPuntosMalla();
+    ctx.clearRect(0,0,canvas.width,canvas.height); ctx.drawImage(buffer,0,0);
+  };
+  document.getElementById('mallaAplicar').onclick = ()=>{
+    if(!mallaOrigen) return;
+    guardarHistorial();
+    const temp = document.createElement('canvas');
+    temp.width = buffer.width; temp.height = buffer.height;
+    dibujarMallaEn(temp.getContext('2d'));
+    bctx.clearRect(0,0,buffer.width,buffer.height);
+    bctx.drawImage(temp,0,0);
+    mallaOrigen = mallaIdentidad();
+    mallaPuntos = clonarMalla(mallaOrigen);
+    dibujarPuntosMalla();
+    ctx.clearRect(0,0,canvas.width,canvas.height); ctx.drawImage(buffer,0,0);
+    showToast('Zona estirada — puedes seguir ajustando o cambiar de herramienta');
+  };
   // "Varita": como el bote de pintura de Paint pero para borrar — un clic
   // selecciona toda la región conectada de color parecido (ej. una manga
   // completa si es de un solo color) y la vuelve transparente de un jalón.
@@ -2870,6 +3025,7 @@ async function abrirEditorPrenda(p, tabInicial){
   const panelAjustar = document.getElementById('panelAjustar'), panelBorrador = document.getElementById('panelBorrador');
   function mostrarTab(t){
     if(t==='borrador' && tabActual==='ajustar') hornearAjusteEnBuffer();
+    if(t==='ajustar' && tabActual==='borrador' && modo==='malla') elegirModo('libre');
     tabActual = t;
     tabAjustarBtn.classList.toggle('active', t==='ajustar');
     tabBorradorBtn.classList.toggle('active', t==='borrador');
