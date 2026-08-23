@@ -354,7 +354,7 @@ let SHEET_URL = '';
 // Nombre-landmark de esta versión — cámbialo en cada cambio que se
 // despliegue, así se puede saber a simple vista (en Perfil) si el
 // celular ya está viendo lo último o una copia vieja en caché.
-const BUILD_VERSION = 'Isla Contoy 2';
+const BUILD_VERSION = 'Isla Mujeres 2';
 let DATA = { prendas: [], usos: [], outfits_sugeridos: [], perfil: [], fotos_origen: [] };
 let showTrash = false;
 let soloFavoritos = false;
@@ -2431,7 +2431,7 @@ async function abrirEditorPrenda(p, tabInicial){
     <h3>Editar imagen</h3>
     <div class="chips" style="justify-content:center">
       <button class="chip" id="tabAjustar">✋ Ajustar posición</button>
-      <button class="chip" id="tabBorrador">🧽 Borrador</button>
+      <button class="chip" id="tabBorrador">🧽 Editar diseño</button>
     </div>
     <div id="borradorScrollWrap" style="max-width:280px;max-height:55vh;overflow:auto;margin:10px auto 0;border-radius:10px;border:1px solid var(--border)">
       <div class="maniqui-doll-wrap" id="borradorWrap" style="max-width:none;margin:0">
@@ -2440,7 +2440,6 @@ async function abrirEditorPrenda(p, tabInicial){
         <div id="mallaOverlay" style="position:absolute;inset:0;display:none"></div>
       </div>
     </div>
-    <p class="hint" style="text-align:center;margin-top:8px">🔍 Zoom (para cortes finos) · 📌 Con dos dedos te mueves sin editar nada</p>
     <input type="range" id="borradorZoom" min="100" max="500" value="100" style="width:100%">
     <p class="hint" style="text-align:center;margin-top:4px" id="mallaEstado"></p>
     <div class="chips" id="mallaAcciones" style="display:none;justify-content:center;margin-top:4px">
@@ -2479,15 +2478,22 @@ async function abrirEditorPrenda(p, tabInicial){
     </div>
 
     <div id="panelBorrador" style="display:none">
+      <p class="hint" style="text-align:center;margin-top:4px">Selección — dibuja una forma, luego elige qué hacer con lo que quede dentro:</p>
+      <div class="chips" style="justify-content:center;flex-wrap:wrap;overflow:visible;margin-top:4px">
+        <button class="chip" id="modoLazo">➰ Forma libre</button>
+        <button class="chip" id="modoOvalo">⭕ Óvalo</button>
+        <button class="chip" id="modoRect">▭ Rectángulo</button>
+      </div>
+      <div class="chips" style="justify-content:center;flex-wrap:wrap;overflow:visible;margin-top:6px">
+        <button class="chip" id="modoMalla" title="Cuadrícula de puntos: jala uno para estirar solo esa zona (ej. alargar solo la parte de abajo de una pierna)">🕸️ Malla (estirar zonas)</button>
+        <button class="chip" id="modoVarita">🪄 Varita (clic y elimina)</button>
+      </div>
       <div class="chips" style="justify-content:center;flex-wrap:wrap;overflow:visible;margin-top:6px">
         <button class="chip active" id="modoLibre">✏️ Trazo libre</button>
         <button class="chip" id="modoLinea">／ Línea recta</button>
-        <button class="chip" id="modoOvalo">⭕ Óvalo</button>
-        <button class="chip" id="modoRect">▭ Rectángulo</button>
-        <button class="chip" id="modoVarita">🪄 Varita (clic y selecciona)</button>
+      </div>
+      <div class="chips" style="justify-content:center;flex-wrap:wrap;overflow:visible;margin-top:6px">
         <button class="chip" id="modoClonar">🧵 Clonar (traer tela)</button>
-        <button class="chip" id="modoLazo">➰ Selección (forma libre)</button>
-        <button class="chip" id="modoMalla" title="Cuadrícula de puntos: jala uno para estirar solo esa zona (ej. alargar solo la parte de abajo de una pierna)">🕸️ Malla (estirar zonas)</button>
       </div>
       <p class="hint" style="text-align:center;margin-top:4px" id="clonEstado"></p>
       <div class="chips" style="justify-content:center;margin-top:6px">
@@ -2645,8 +2651,9 @@ async function abrirEditorPrenda(p, tabInicial){
     if(modo==='malla' && m!=='malla') salirModoMalla();
     modo = m;
     Object.entries(botonesModo).forEach(([k,b])=> b.classList.toggle('active', k===m));
-    grosorLabel.style.display = (m==='varita'||m==='lazo'||m==='malla') ? 'none' : '';
-    grosorInput.style.display = (m==='varita'||m==='lazo'||m==='malla') ? 'none' : '';
+    const esSeleccion = m==='lazo'||m==='ovalo'||m==='rectangulo';
+    grosorLabel.style.display = (m==='varita'||esSeleccion||m==='malla') ? 'none' : '';
+    grosorInput.style.display = (m==='varita'||esSeleccion||m==='malla') ? 'none' : '';
     fuenteClon = null; fuenteSnap = null;
     btnNuevaFuente.style.display = m==='clonar' ? '' : 'none';
     clonEstado.textContent = m==='clonar' ? 'Toca la parte de tela buena que quieres copiar' : '';
@@ -2655,8 +2662,8 @@ async function abrirEditorPrenda(p, tabInicial){
   }
   botonesModo.libre.onclick = ()=> elegirModo('libre');
   botonesModo.linea.onclick = ()=> elegirModo('linea');
-  botonesModo.ovalo.onclick = ()=> elegirModo('ovalo');
-  botonesModo.rectangulo.onclick = ()=> elegirModo('rectangulo');
+  botonesModo.ovalo.onclick = ()=>{ elegirModo('ovalo'); lazoEstadoTxt.textContent = 'Arrastra para dibujar el óvalo'; };
+  botonesModo.rectangulo.onclick = ()=>{ elegirModo('rectangulo'); lazoEstadoTxt.textContent = 'Arrastra para dibujar el rectángulo'; };
   botonesModo.varita.onclick = ()=> elegirModo('varita');
   botonesModo.clonar.onclick = ()=> elegirModo('clonar');
   botonesModo.lazo.onclick = ()=>{ elegirModo('lazo'); lazoEstadoTxt.textContent = 'Dibuja el contorno de lo que quieres seleccionar'; };
@@ -2762,6 +2769,23 @@ async function abrirEditorPrenda(p, tabInicial){
     c.beginPath();
     c.moveTo(lazoPuntos[0].x, lazoPuntos[0].y);
     for(let i=1;i<lazoPuntos.length;i++) c.lineTo(lazoPuntos[i].x, lazoPuntos[i].y);
+  };
+  // Óvalo/Rectángulo pasaron de "borrar directo al soltar" a ser
+  // selecciones como el lazo (✓ Borrar/🤚 Mover/🎨 Llenar/✗ Cancelar) —
+  // pedido explícito. En vez de duplicar todo el manejo del lazo, se
+  // arma un `lazoPuntos` que aproxima la forma dibujada y de ahí en
+  // adelante es EXACTAMENTE el mismo camino que ya usaba el lazo
+  // (trazarPathLazo/recortarPorLazo/dentroDelPoligono no distinguen de
+  // dónde salió el contorno).
+  const puntosDeRectangulo = (a,b)=>{
+    const x0=Math.min(a.x,b.x), x1=Math.max(a.x,b.x), y0=Math.min(a.y,b.y), y1=Math.max(a.y,b.y);
+    return [{x:x0,y:y0},{x:x1,y:y0},{x:x1,y:y1},{x:x0,y:y1}];
+  };
+  const puntosDeOvalo = (a,b)=>{
+    const cx=(a.x+b.x)/2, cy=(a.y+b.y)/2, rx=Math.abs(b.x-a.x)/2, ry=Math.abs(b.y-a.y)/2;
+    const N = 48, pts = [];
+    for(let i=0;i<N;i++){ const t = i/N*Math.PI*2; pts.push({ x: cx+Math.cos(t)*rx, y: cy+Math.sin(t)*ry }); }
+    return pts;
   };
   const dibujarLazoPreview = (cerrado)=>{
     if(lazoPuntos.length<2) return;
@@ -3147,7 +3171,7 @@ async function abrirEditorPrenda(p, tabInicial){
       clonEstado.textContent = 'Listo — ahora arrastra donde falta tela';
       return;
     }
-    if(modo==='lazo'){
+    if(modo==='lazo' || modo==='ovalo' || modo==='rectangulo'){
       if(lazoEstadoActual==='moviendo'){
         activo = true;
         moverInicio = pos;
@@ -3155,10 +3179,11 @@ async function abrirEditorPrenda(p, tabInicial){
       }
       // Empieza un contorno nuevo — si ya había uno "listo" sin decidir,
       // se reemplaza por este (más simple que obligar a tocar ✗ primero).
-      lazoPuntos = [pos];
+      if(modo==='lazo') lazoPuntos = [pos];
+      else { inicio = pos; ultimo = pos; } // el óvalo/rectángulo arma su lazoPuntos hasta soltar, ya con el tamaño final
       lazoEstadoActual = 'dibujando';
       lazoAcciones.style.display = 'none';
-      lazoEstadoTxt.textContent = 'Dibuja el contorno de lo que quieres seleccionar';
+      lazoEstadoTxt.textContent = modo==='lazo' ? 'Dibuja el contorno de lo que quieres seleccionar' : 'Arrastra hasta el tamaño que quieras y suelta';
       activo = true;
       return;
     }
@@ -3195,7 +3220,7 @@ async function abrirEditorPrenda(p, tabInicial){
     }
     if(!activo || e.pointerId !== punteroActivo) return;
     const pos = posEnCanvas(e);
-    if(modo==='ovalo' || modo==='rectangulo'){
+    if((modo==='ovalo' || modo==='rectangulo') && lazoEstadoActual==='dibujando'){
       ultimo = pos;
       pedirRedibujo(()=> dibujarFigura(ctx, true));
     } else if(modo==='linea'){
@@ -3212,7 +3237,7 @@ async function abrirEditorPrenda(p, tabInicial){
     } else if(modo==='lazo' && lazoEstadoActual==='dibujando'){
       lazoPuntos.push(pos);
       pedirRedibujo(()=> dibujarLazoPreview(false));
-    } else if(modo==='lazo' && lazoEstadoActual==='moviendo' && moverInicio){
+    } else if((modo==='lazo'||modo==='ovalo'||modo==='rectangulo') && lazoEstadoActual==='moviendo' && moverInicio){
       moverDeltaActual = { x: pos.x-moverInicio.x, y: pos.y-moverInicio.y };
       pedirRedibujo(()=> ctx.drawImage(recorteLevantado, moverDeltaActual.x, moverDeltaActual.y));
     }
@@ -3228,7 +3253,9 @@ async function abrirEditorPrenda(p, tabInicial){
     // (con una vista previa vieja de figura/línea/lazo) — que no
     // sobrescriba lo que se dibuja aquí al soltar.
     dibujarExtra = null;
-    if(modo==='lazo' && lazoEstadoActual==='dibujando'){
+    if((modo==='lazo'||modo==='ovalo'||modo==='rectangulo') && lazoEstadoActual==='dibujando'){
+      if(modo==='ovalo') lazoPuntos = puntosDeOvalo(inicio, ultimo);
+      else if(modo==='rectangulo') lazoPuntos = puntosDeRectangulo(inicio, ultimo);
       if(lazoPuntos.length>=3){
         lazoEstadoActual = 'lista';
         // Dibujar directo aquí (en vez de vía pedirRedibujo) se veía bien
@@ -3246,14 +3273,13 @@ async function abrirEditorPrenda(p, tabInicial){
       }
       return;
     }
-    if(modo==='lazo' && lazoEstadoActual==='moviendo'){
+    if((modo==='lazo'||modo==='ovalo'||modo==='rectangulo') && lazoEstadoActual==='moviendo'){
       bctx.drawImage(recorteLevantado, moverDeltaActual.x, moverDeltaActual.y);
       recorteLevantado = null; lazoEstadoActual = null; moverInicio = null; moverDeltaActual = {x:0,y:0};
       lazoEstadoTxt.textContent = '';
       ctx.clearRect(0,0,canvas.width,canvas.height); ctx.drawImage(buffer,0,0);
       return;
     }
-    if(modo==='ovalo' || modo==='rectangulo') dibujarFigura(bctx, false);
     if(modo==='linea') borrarLinea(bctx, inicio, ultimo, grosor*escala());
     ctx.clearRect(0,0,canvas.width,canvas.height); ctx.drawImage(buffer,0,0);
   };
