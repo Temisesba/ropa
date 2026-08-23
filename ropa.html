@@ -145,6 +145,7 @@ nav.tabbar button .ic{font-size:19px}
 </style>
 </head>
 <body>
+<button onclick="location.href='https://temisesba.github.io/app-completa/'" title="Volver a App Completa" style="position:fixed;top:calc(8px + env(safe-area-inset-top,0px));left:8px;z-index:99999;width:34px;height:34px;border-radius:50%;border:none;background:rgba(0,0,0,.45);color:#fff;font-size:15px;display:flex;align-items:center;justify-content:center;cursor:pointer;backdrop-filter:blur(6px);box-shadow:0 1px 4px rgba(0,0,0,.3);">🏠</button>
 
 <div id="setupScreen">
   <div class="setup-card">
@@ -2164,6 +2165,7 @@ function abrirVerPrenda(id){
     </div>
     <p class="hint" style="margin-top:10px">${CATEGORIA_ICONO[p.Categoria]||''} ${escAttr(p.Categoria)} · ${escAttr(p.Color||'')}${p.ColorSecundario?'/'+escAttr(p.ColorSecundario):''} ${p.Estampado?'· '+escAttr(p.Estampado):''}</p>
     ${p.Marca?`<p class="hint">Marca: ${escAttr(p.Marca)}</p>`:''}
+    ${p.Precio?`<p class="hint">Precio: $${Number(p.Precio).toLocaleString('es-MX',{minimumFractionDigits:2})}${p.Origen?' · '+escAttr(p.Origen):''}</p>`:''}
     ${p.Formalidad?`<p class="hint">Formalidad: ${escAttr(p.Formalidad)}</p>`:''}
     ${p.Notas?`<p class="hint">${escAttr(p.Notas)}</p>`:''}
     <p class="hint"><b>${Number(p.VecesUsado)||0} usos</b> · ${usoTxt}</p>
@@ -2199,6 +2201,8 @@ function abrirEditarPrenda(id){
     <div class="field"><label>Color</label><input id="edColor" value="${escAttr(p.Color||'')}"></div>
     <div class="field"><label>Color secundario</label><input id="edColor2" value="${escAttr(p.ColorSecundario||'')}"></div>
     <div class="field"><label>Marca</label><input id="edMarca" value="${escAttr(p.Marca||'')}"></div>
+    <div class="field"><label>Precio</label><input id="edPrecio" type="number" min="0" step="0.01" placeholder="$" value="${escAttr(p.Precio||'')}"></div>
+    <div class="field"><label>Origen</label><input id="edOrigen" placeholder="ej. de dónde la compraste" value="${escAttr(p.Origen||'')}"></div>
     <div class="field"><label>Formalidad</label><select id="edForm"><option value="">Sin definir</option>${FORMALIDADES.map(f=>`<option ${f===p.Formalidad?'selected':''}>${f}</option>`).join('')}</select></div>
     <div class="field"><label>Notas</label><textarea id="edNotas" rows="2">${escAttr(p.Notas||'')}</textarea></div>
     <div class="field"><label>Historial de uso ${Number(p.VecesUsado)?`(${Number(p.VecesUsado)} veces)`:''}</label>${historialUsoHtml(p)}</div>
@@ -2248,6 +2252,8 @@ function abrirEditarPrenda(id){
     p.Color = overlay.querySelector('#edColor').value;
     p.ColorSecundario = overlay.querySelector('#edColor2').value;
     p.Marca = overlay.querySelector('#edMarca').value;
+    p.Precio = parseFloat(overlay.querySelector('#edPrecio').value) || '';
+    p.Origen = overlay.querySelector('#edOrigen').value;
     p.Formalidad = overlay.querySelector('#edForm').value;
     p.Notas = overlay.querySelector('#edNotas').value;
     overlay.remove();
