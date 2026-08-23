@@ -354,7 +354,7 @@ let SHEET_URL = '';
 // Nombre-landmark de esta versión — cámbialo en cada cambio que se
 // despliegue, así se puede saber a simple vista (en Perfil) si el
 // celular ya está viendo lo último o una copia vieja en caché.
-const BUILD_VERSION = 'Xel-Ha 2';
+const BUILD_VERSION = 'Xcaret 2';
 let DATA = { prendas: [], usos: [], outfits_sugeridos: [], perfil: [], fotos_origen: [] };
 let showTrash = false;
 let soloFavoritos = false;
@@ -2893,13 +2893,37 @@ async function abrirEditorPrenda(p, tabInicial){
     ctxDestino.setTransform(1,0,0,1,0,0);
     ctxDestino.restore();
   }
-  function dibujarMallaEn(ctxDestino){
+  const bilerp = (p00,p01,p10,p11,u,v)=> ({
+    x: p00.x*(1-u)*(1-v) + p01.x*u*(1-v) + p10.x*(1-u)*v + p11.x*u*v,
+    y: p00.y*(1-u)*(1-v) + p01.y*u*(1-v) + p10.y*(1-u)*v + p11.y*u*v
+  });
+  // subdiv=1 (vista previa mientras se arrastra): los triángulos grandes
+  // de la cuadrícula, rápido pero se nota "por bloques". subdiv>1 (al
+  // aplicar de verdad): cada celda se parte en subdiv×subdiv pedazos
+  // MÁS interpolando suavemente sus 4 esquinas (origen Y destino) antes
+  // de triangular — no es cortar más a lo bruto, es que la costura entre
+  // triangulitos vecinos queda tan chica que ya no se nota a simple
+  // vista, sin cambiar cómo se ve la vista previa mientras se arrastra.
+  function dibujarMallaEn(ctxDestino, subdiv){
+    subdiv = subdiv||1;
     for(let f=0; f<MALLA_FILAS-1; f++){
       for(let c=0; c<MALLA_COLS-1; c++){
         const s00=mallaOrigen[f][c], s01=mallaOrigen[f][c+1], s10=mallaOrigen[f+1][c], s11=mallaOrigen[f+1][c+1];
         const d00=mallaPuntos[f][c], d01=mallaPuntos[f][c+1], d10=mallaPuntos[f+1][c], d11=mallaPuntos[f+1][c+1];
-        dibujarTrianguloWarp(ctxDestino, buffer, s00,s01,s10, d00,d01,d10);
-        dibujarTrianguloWarp(ctxDestino, buffer, s01,s11,s10, d01,d11,d10);
+        if(subdiv<=1){
+          dibujarTrianguloWarp(ctxDestino, buffer, s00,s01,s10, d00,d01,d10);
+          dibujarTrianguloWarp(ctxDestino, buffer, s01,s11,s10, d01,d11,d10);
+          continue;
+        }
+        for(let i=0;i<subdiv;i++){
+          for(let j=0;j<subdiv;j++){
+            const u0=i/subdiv, u1=(i+1)/subdiv, v0=j/subdiv, v1=(j+1)/subdiv;
+            const sA=bilerp(s00,s01,s10,s11,u0,v0), sB=bilerp(s00,s01,s10,s11,u1,v0), sC=bilerp(s00,s01,s10,s11,u0,v1), sD=bilerp(s00,s01,s10,s11,u1,v1);
+            const dA=bilerp(d00,d01,d10,d11,u0,v0), dB=bilerp(d00,d01,d10,d11,u1,v0), dC=bilerp(d00,d01,d10,d11,u0,v1), dD=bilerp(d00,d01,d10,d11,u1,v1);
+            dibujarTrianguloWarp(ctxDestino, buffer, sA,sB,sC, dA,dB,dC);
+            dibujarTrianguloWarp(ctxDestino, buffer, sB,sD,sC, dB,dD,dC);
+          }
+        }
       }
     }
   }
@@ -2973,17 +2997,29 @@ async function abrirEditorPrenda(p, tabInicial){
   };
   document.getElementById('mallaAplicar').onclick = ()=>{
     if(!mallaOrigen) return;
-    guardarHistorial();
-    const temp = document.createElement('canvas');
-    temp.width = buffer.width; temp.height = buffer.height;
-    dibujarMallaEn(temp.getContext('2d'));
-    bctx.clearRect(0,0,buffer.width,buffer.height);
-    bctx.drawImage(temp,0,0);
-    mallaOrigen = mallaIdentidad();
-    mallaPuntos = clonarMalla(mallaOrigen);
-    dibujarPuntosMalla();
-    ctx.clearRect(0,0,canvas.width,canvas.height); ctx.drawImage(buffer,0,0);
-    showToast('Zona estirada — puedes seguir ajustando o cambiar de herramienta');
+    const btnMalla = document.getElementById('mallaAplicar');
+    btnMalla.disabled = true; btnMalla.textContent = 'Aplicando…';
+    // El subdiv=1 de la vista previa (mientras arrastras) usa los
+    // triángulos grandes, rápido. Aquí, al aplicar de verdad, se parte
+    // cada celda en muchos pedazos chicos (subdiv=5) para que la costura
+    // entre triángulos casi no se note en el resultado guardado — más
+    // lento, por eso solo pasa una vez al confirmar, no en cada frame
+    // mientras se arrastra. setTimeout deja que el botón "Aplicando…" se
+    // pinte antes de la parte pesada.
+    setTimeout(()=>{
+      guardarHistorial();
+      const temp = document.createElement('canvas');
+      temp.width = buffer.width; temp.height = buffer.height;
+      dibujarMallaEn(temp.getContext('2d'), 5);
+      bctx.clearRect(0,0,buffer.width,buffer.height);
+      bctx.drawImage(temp,0,0);
+      mallaOrigen = mallaIdentidad();
+      mallaPuntos = clonarMalla(mallaOrigen);
+      dibujarPuntosMalla();
+      ctx.clearRect(0,0,canvas.width,canvas.height); ctx.drawImage(buffer,0,0);
+      btnMalla.disabled = false; btnMalla.textContent = '✓ Aplicar';
+      showToast('Zona estirada — puedes seguir ajustando o cambiar de herramienta');
+    }, 30);
   };
   // "Varita": como el bote de pintura de Paint pero para borrar — un clic
   // selecciona toda la región conectada de color parecido (ej. una manga
