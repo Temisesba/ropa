@@ -354,7 +354,7 @@ let SHEET_URL = '';
 // Nombre-landmark de esta versión — cámbialo en cada cambio que se
 // despliegue, así se puede saber a simple vista (en Perfil) si el
 // celular ya está viendo lo último o una copia vieja en caché.
-const BUILD_VERSION = 'Zacatecas 3';
+const BUILD_VERSION = 'Campeche 3';
 let DATA = { prendas: [], usos: [], outfits_sugeridos: [], perfil: [], fotos_origen: [], maniqui_base: [] };
 let showTrash = false;
 let soloFavoritos = false;
@@ -4213,7 +4213,7 @@ async function mejorarOutfitConIA(prendaIds, areaId, btnId){
 // necesiten, en vez de seguir reusando el resultado viejo guardado en
 // MANIQUI_BASE — bump aquí cada vez que se ajuste el prompt de
 // generarManiquiBase (color, cara, pose, etc.).
-const MANIQUI_BASE_VERSION = 'v2';
+const MANIQUI_BASE_VERSION = 'v3';
 async function obtenerManiquiBase(genero, estatura){
   estatura = estatura || localStorage.getItem('ropa_maniqui_estatura') || 'chaparrita';
   const cacheKey = 'ropa_maniqui_base_'+MANIQUI_BASE_VERSION+'_'+genero+'_'+estatura;
