@@ -354,7 +354,7 @@ let SHEET_URL = '';
 // Nombre-landmark de esta versión — cámbialo en cada cambio que se
 // despliegue, así se puede saber a simple vista (en Perfil) si el
 // celular ya está viendo lo último o una copia vieja en caché.
-const BUILD_VERSION = 'Bacalar 3';
+const BUILD_VERSION = 'Uxmal 2';
 let DATA = { prendas: [], usos: [], outfits_sugeridos: [], perfil: [], fotos_origen: [], maniqui_base: [] };
 let showTrash = false;
 let soloFavoritos = false;
@@ -2447,6 +2447,10 @@ async function abrirEditorPrenda(p, tabInicial){
       <button class="chip" id="mallaReiniciar">↺ Reiniciar cuadrícula</button>
     </div>
     <p class="hint" style="text-align:center;margin-top:4px" id="lazoEstado"></p>
+    <div class="chips" id="poligonoAcciones" style="display:none;justify-content:center;margin-top:4px">
+      <button class="chip" id="poligonoCerrar">✓ Cerrar forma</button>
+      <button class="chip" id="poligonoCancelar">✗ Cancelar</button>
+    </div>
     <div class="chips" id="lazoAcciones" style="display:none;justify-content:center;margin-top:4px">
       <button class="chip" id="lazoBorrar">✓ Borrar</button>
       <button class="chip" id="lazoMover">🤚 Mover</button>
@@ -2483,6 +2487,7 @@ async function abrirEditorPrenda(p, tabInicial){
         <button class="chip" id="modoLazo">➰ Forma libre</button>
         <button class="chip" id="modoOvalo">⭕ Óvalo</button>
         <button class="chip" id="modoRect">▭ Rectángulo</button>
+        <button class="chip" id="modoPoligono" title="Toca para ir poniendo cada esquina, únelas con líneas rectas">📐 Polígono</button>
       </div>
       <div class="chips" style="justify-content:center;flex-wrap:wrap;overflow:visible;margin-top:6px">
         <button class="chip" id="modoMalla" title="Cuadrícula de puntos: jala uno para estirar solo esa zona (ej. alargar solo la parte de abajo de una pierna)">🕸️ Malla (estirar zonas)</button>
@@ -2637,19 +2642,21 @@ async function abrirEditorPrenda(p, tabInicial){
   function cancelarLazo(){
     lazoPuntos = []; lazoEstadoActual = null; recorteLevantado = null; moverInicio = null; moverDeltaActual = {x:0,y:0};
     lazoAcciones.style.display = 'none';
+    if(poligonoAcciones) poligonoAcciones.style.display = 'none';
     lazoEstadoTxt.textContent = '';
     ctx.clearRect(0,0,canvas.width,canvas.height); ctx.drawImage(buffer,0,0);
   }
   document.getElementById('borradorZoom').oninput = e=>{ wrap.style.width = (280*Number(e.target.value)/100)+'px'; };
   document.getElementById('borradorGrosor').oninput = e=> grosor = Number(e.target.value);
-  const botonesModo = { libre: document.getElementById('modoLibre'), linea: document.getElementById('modoLinea'), ovalo: document.getElementById('modoOvalo'), rectangulo: document.getElementById('modoRect'), varita: document.getElementById('modoVarita'), clonar: document.getElementById('modoClonar'), lazo: document.getElementById('modoLazo'), malla: document.getElementById('modoMalla') };
+  const botonesModo = { libre: document.getElementById('modoLibre'), linea: document.getElementById('modoLinea'), ovalo: document.getElementById('modoOvalo'), rectangulo: document.getElementById('modoRect'), poligono: document.getElementById('modoPoligono'), varita: document.getElementById('modoVarita'), clonar: document.getElementById('modoClonar'), lazo: document.getElementById('modoLazo'), malla: document.getElementById('modoMalla') };
   const grosorLabel = document.getElementById('borradorGrosorLabel'), grosorInput = document.getElementById('borradorGrosor');
   const clonEstado = document.getElementById('clonEstado'), btnNuevaFuente = document.getElementById('borradorNuevaFuente');
+  const poligonoAcciones = document.getElementById('poligonoAcciones');
   function elegirModo(m){
     if(modo==='malla' && m!=='malla') salirModoMalla();
     modo = m;
     Object.entries(botonesModo).forEach(([k,b])=> b.classList.toggle('active', k===m));
-    const esSeleccion = m==='lazo'||m==='ovalo'||m==='rectangulo';
+    const esSeleccion = m==='lazo'||m==='ovalo'||m==='rectangulo'||m==='poligono';
     grosorLabel.style.display = (m==='varita'||esSeleccion||m==='malla') ? 'none' : '';
     grosorInput.style.display = (m==='varita'||esSeleccion||m==='malla') ? 'none' : '';
     fuenteClon = null; fuenteSnap = null;
@@ -2662,6 +2669,7 @@ async function abrirEditorPrenda(p, tabInicial){
   botonesModo.linea.onclick = ()=> elegirModo('linea');
   botonesModo.ovalo.onclick = ()=>{ elegirModo('ovalo'); lazoEstadoTxt.textContent = 'Arrastra para dibujar el óvalo'; };
   botonesModo.rectangulo.onclick = ()=>{ elegirModo('rectangulo'); lazoEstadoTxt.textContent = 'Arrastra para dibujar el rectángulo'; };
+  botonesModo.poligono.onclick = ()=>{ elegirModo('poligono'); lazoEstadoTxt.textContent = 'Toca para ir poniendo cada esquina (mínimo 3)'; };
   botonesModo.varita.onclick = ()=> elegirModo('varita');
   botonesModo.clonar.onclick = ()=> elegirModo('clonar');
   botonesModo.lazo.onclick = ()=>{ elegirModo('lazo'); lazoEstadoTxt.textContent = 'Dibuja el contorno de lo que quieres seleccionar'; };
@@ -3183,6 +3191,30 @@ async function abrirEditorPrenda(p, tabInicial){
       clonEstado.textContent = 'Listo — ahora arrastra donde falta tela';
       return;
     }
+    if(modo==='poligono'){
+      if(lazoEstadoActual==='moviendo'){
+        activo = true;
+        moverInicio = pos;
+        return;
+      }
+      // A diferencia del lazo (un solo arrastre continuo), el polígono
+      // se arma con TOQUES sueltos — cada pointerdown agrega un punto y
+      // ya, sin esperar un arrastre ni soltar (por eso NO se pone
+      // activo=true aquí: cada toque es independiente, no un gesto largo
+      // que haya que rastrear con pointermove/pointerup).
+      if(lazoEstadoActual!=='dibujando'){
+        lazoPuntos = [];
+        lazoEstadoActual = 'dibujando';
+        lazoAcciones.style.display = 'none';
+      }
+      lazoPuntos.push(pos);
+      if(poligonoAcciones) poligonoAcciones.style.display = lazoPuntos.length>=3 ? '' : 'none';
+      lazoEstadoTxt.textContent = lazoPuntos.length<3
+        ? 'Toca para agregar puntos ('+lazoPuntos.length+'/3 mínimo)'
+        : 'Sigue tocando para agregar más, o cierra la forma ('+lazoPuntos.length+' puntos)';
+      pedirRedibujo(()=> dibujarLazoPreview(false));
+      return;
+    }
     if(modo==='lazo' || modo==='ovalo' || modo==='rectangulo'){
       if(lazoEstadoActual==='moviendo'){
         activo = true;
@@ -3249,7 +3281,7 @@ async function abrirEditorPrenda(p, tabInicial){
     } else if(modo==='lazo' && lazoEstadoActual==='dibujando'){
       lazoPuntos.push(pos);
       pedirRedibujo(()=> dibujarLazoPreview(false));
-    } else if((modo==='lazo'||modo==='ovalo'||modo==='rectangulo') && lazoEstadoActual==='moviendo' && moverInicio){
+    } else if((modo==='lazo'||modo==='ovalo'||modo==='rectangulo'||modo==='poligono') && lazoEstadoActual==='moviendo' && moverInicio){
       moverDeltaActual = { x: pos.x-moverInicio.x, y: pos.y-moverInicio.y };
       pedirRedibujo(()=> ctx.drawImage(recorteLevantado, moverDeltaActual.x, moverDeltaActual.y));
     }
@@ -3285,7 +3317,7 @@ async function abrirEditorPrenda(p, tabInicial){
       }
       return;
     }
-    if((modo==='lazo'||modo==='ovalo'||modo==='rectangulo') && lazoEstadoActual==='moviendo'){
+    if((modo==='lazo'||modo==='ovalo'||modo==='rectangulo'||modo==='poligono') && lazoEstadoActual==='moviendo'){
       bctx.drawImage(recorteLevantado, moverDeltaActual.x, moverDeltaActual.y);
       recorteLevantado = null; lazoEstadoActual = null; moverInicio = null; moverDeltaActual = {x:0,y:0};
       lazoEstadoTxt.textContent = '';
@@ -3298,6 +3330,15 @@ async function abrirEditorPrenda(p, tabInicial){
   canvas.addEventListener('pointerup', soltarPuntero);
   canvas.addEventListener('pointercancel', soltarPuntero);
   document.getElementById('lazoCancelar').onclick = ()=> cancelarLazo();
+  document.getElementById('poligonoCancelar').onclick = ()=> cancelarLazo();
+  document.getElementById('poligonoCerrar').onclick = ()=>{
+    if(lazoPuntos.length<3) return;
+    lazoEstadoActual = 'lista';
+    poligonoAcciones.style.display = 'none';
+    pedirRedibujo(()=> dibujarLazoPreview(true));
+    lazoAcciones.style.display = '';
+    lazoEstadoTxt.textContent = '¿Qué quieres hacer con la selección?';
+  };
   document.getElementById('lazoLlenar').onclick = ()=>{
     if(lazoPuntos.length<3) return;
     const color = colorTelaAlrededorDeLazo();
