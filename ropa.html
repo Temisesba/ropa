@@ -354,7 +354,7 @@ let SHEET_URL = '';
 // Nombre-landmark de esta versión — cámbialo en cada cambio que se
 // despliegue, así se puede saber a simple vista (en Perfil) si el
 // celular ya está viendo lo último o una copia vieja en caché.
-const BUILD_VERSION = 'Campeche 3';
+const BUILD_VERSION = 'Chiapas 3';
 let DATA = { prendas: [], usos: [], outfits_sugeridos: [], perfil: [], fotos_origen: [], maniqui_base: [] };
 let showTrash = false;
 let soloFavoritos = false;
@@ -4212,11 +4212,18 @@ async function mejorarOutfitConIA(prendaIds, areaId, btnId){
 // este backend) regeneren el maniquí una vez más la próxima vez que lo
 // necesiten, en vez de seguir reusando el resultado viejo guardado en
 // MANIQUI_BASE — bump aquí cada vez que se ajuste el prompt de
-// generarManiquiBase (color, cara, pose, etc.).
-const MANIQUI_BASE_VERSION = 'v3';
+// generarManiquiBase (color, cara, pose, etc.). IMPORTANTE: usar un
+// valor que NUNCA se haya usado antes en este campo — este mismo app
+// ya tuvo esquemas de caché "v2"/"v3" hace tiempo (el maniquí "cara
+// amigable" y el de antes de este mismo round), así que reusar esos
+// nombres encontraba el maniquí gris viejísimo en vez de regenerar
+// (bug real, ya pasó una vez). Por eso el prefijo de la llave cambió
+// de raíz (ropa_maniqui_compartido_, nunca usado antes) y este valor
+// debe llevar fecha o algo igual de único, nunca "v2"/"v3" sueltos.
+const MANIQUI_BASE_VERSION = '2026-08-23c';
 async function obtenerManiquiBase(genero, estatura){
   estatura = estatura || localStorage.getItem('ropa_maniqui_estatura') || 'chaparrita';
-  const cacheKey = 'ropa_maniqui_base_'+MANIQUI_BASE_VERSION+'_'+genero+'_'+estatura;
+  const cacheKey = 'ropa_maniqui_compartido_'+MANIQUI_BASE_VERSION+'_'+genero+'_'+estatura;
   const cached = localStorage.getItem(cacheKey);
   if(cached){ try{ return JSON.parse(cached); }catch(e){} }
   const compartido = DATA.maniqui_base.find(m=>m.Genero===genero && m.Estatura===estatura && m.Version===MANIQUI_BASE_VERSION && m.URL);
