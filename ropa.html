@@ -354,7 +354,7 @@ let SHEET_URL = '';
 // Nombre-landmark de esta versión — cámbialo en cada cambio que se
 // despliegue, así se puede saber a simple vista (en Perfil) si el
 // celular ya está viendo lo último o una copia vieja en caché.
-const BUILD_VERSION = 'Palenque 2';
+const BUILD_VERSION = 'Coba 2';
 let DATA = { prendas: [], usos: [], outfits_sugeridos: [], perfil: [], fotos_origen: [] };
 let showTrash = false;
 let soloFavoritos = false;
@@ -2832,7 +2832,14 @@ async function abrirEditorPrenda(p, tabInicial){
   // liquify suave de verdad (eso necesita matemáticas más pesadas) — se
   // nota "por bloques" cerca de las costuras de los triángulos, pero
   // alcanza perfectamente para estirar una zona como en el pedido.
-  const MALLA_COLS = 5, MALLA_FILAS = 6;
+  // Columnas en número PAR a propósito: con un número impar (ej. 5) una
+  // columna cae exactamente al centro — justo en el hueco entre las dos
+  // piernas de un pantalón — y ese único punto queda compartido por
+  // ambas piernas (jalarlo para una las mueve las dos). Con 6, en vez de
+  // un punto central hay dos (uno más pegado a cada pierna), cada uno
+  // jalable por separado — pedido explícito: "necesito atraer ambas...
+  // dos puntos en medio, uno para cada pie".
+  const MALLA_COLS = 6, MALLA_FILAS = 6;
   let mallaOrigen = null, mallaPuntos = null, mallaArrastre = null, mallaRedibujoPendiente = false;
   const mallaOverlayEl = document.getElementById('mallaOverlay');
   const mallaEstadoTxt = document.getElementById('mallaEstado');
