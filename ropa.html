@@ -354,7 +354,7 @@ let SHEET_URL = '';
 // Nombre-landmark de esta versión — cámbialo en cada cambio que se
 // despliegue, así se puede saber a simple vista (en Perfil) si el
 // celular ya está viendo lo último o una copia vieja en caché.
-const BUILD_VERSION = 'Chiapas 3';
+const BUILD_VERSION = 'Sian Kaan 2';
 let DATA = { prendas: [], usos: [], outfits_sugeridos: [], perfil: [], fotos_origen: [], maniqui_base: [] };
 let showTrash = false;
 let soloFavoritos = false;
@@ -4220,7 +4220,7 @@ async function mejorarOutfitConIA(prendaIds, areaId, btnId){
 // (bug real, ya pasó una vez). Por eso el prefijo de la llave cambió
 // de raíz (ropa_maniqui_compartido_, nunca usado antes) y este valor
 // debe llevar fecha o algo igual de único, nunca "v2"/"v3" sueltos.
-const MANIQUI_BASE_VERSION = '2026-08-23c';
+const MANIQUI_BASE_VERSION = '2026-08-23d';
 async function obtenerManiquiBase(genero, estatura){
   estatura = estatura || localStorage.getItem('ropa_maniqui_estatura') || 'chaparrita';
   const cacheKey = 'ropa_maniqui_compartido_'+MANIQUI_BASE_VERSION+'_'+genero+'_'+estatura;
@@ -4238,7 +4238,11 @@ async function obtenerManiquiBase(genero, estatura){
       }
     }
   }
-  const gen = await apiPost('generarManiquiBase', { genero, estatura });
+  // Mismo Tono de piel/Subtono que ya tiene puestos en Perfil (los que
+  // usa sugerirOutfit) — pedido explícito: que el maniquí se parezca a
+  // su propio tono en vez de un beige genérico de maniquí de tienda.
+  const perfilTono = DATA.perfil[0] || {};
+  const gen = await apiPost('generarManiquiBase', { genero, estatura, tonoPiel: perfilTono.TonoPiel||'', subtono: perfilTono.Subtono||'' });
   if(!gen.ok) return null;
   const subida = await apiPost('uploadImage', { imageBase64: gen.imageBase64, mimeType: gen.mimeType||'image/jpeg', fileName:'maniqui-'+genero+'-'+estatura+'.jpg' });
   const info = { base64: gen.imageBase64, mimeType: gen.mimeType||'image/jpeg', url: subida.ok?subida.url:'' };
