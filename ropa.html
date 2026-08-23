@@ -354,7 +354,7 @@ let SHEET_URL = '';
 // Nombre-landmark de esta versión — cámbialo en cada cambio que se
 // despliegue, así se puede saber a simple vista (en Perfil) si el
 // celular ya está viendo lo último o una copia vieja en caché.
-const BUILD_VERSION = 'Dzibilchaltun';
+const BUILD_VERSION = 'Muyil';
 let DATA = { prendas: [], usos: [], outfits_sugeridos: [], perfil: [], fotos_origen: [] };
 let showTrash = false;
 let soloFavoritos = false;
@@ -657,10 +657,18 @@ let currentDetections = null; // { dataUrl, width, height, base64, mimeType, can
 // ajustar dimensiones/recortar/eliminar sin tener que ir a buscarlas al
 // Catálogo.
 let prendasDeEsteLote = [];
+// Filas de USOS (¿qué me puse ese día?) creadas durante ESTE lote — para
+// que el "💾 Guardar" del resumen final (guardarOrdenResumenLote) sepa
+// si debe ACTUALIZAR una fila que ya se creó al procesar cada foto, en
+// vez de crear una duplicada.
+let usosDeEsteLote = [];
+let ultimaFechaLote = '';
 function onFilesSelected(fileList){
   uploadQueue = Array.from(fileList);
   uploadIndex = 0;
   prendasDeEsteLote = [];
+  usosDeEsteLote = [];
+  ultimaFechaLote = '';
   if(!uploadQueue.length) return;
   document.getElementById('uploadProgressWrap').classList.remove('hidden');
   procesarSiguienteFoto();
@@ -755,16 +763,20 @@ function mostrarResumenLote(){
   const prendas = prendasDeEsteLote.map(id=>findPrenda(id)).filter(Boolean);
   if(!prendas.length){ area.innerHTML = ''; ordenResumenLote = []; showToast('Listo — todas las fotos procesadas'); return; }
   ordenResumenLote = prendas.filter(p=>p.FotoGeneradaURL).map(p=>p.ID);
+  const sinCapa = prendas.filter(p=>!p.FotoGeneradaURL);
   area.innerHTML = `<p class="hint" style="margin-top:10px">✅ Listo — ${prendas.length} prenda(s) de este lote.</p>
     <div class="maniqui-doll-wrap" id="resumenLoteManiqui" style="max-width:220px;margin:10px auto"><p class="hint" style="padding:40px 0;text-align:center">Cargando…</p></div>
     <div id="resumenLoteCapas" style="margin-bottom:10px"></div>
-    <p class="hint">Ajusta lo que haga falta:</p>` +
-    prendas.map(p=>`<div class="detect-card" id="resumen-${p.ID}">
+    <div class="field"><label class="hint">¿Cuándo te pusiste esto? (para el historial/Calendario)</label>
+      <input type="date" id="resumenLoteFecha" value="${ultimaFechaLote||hoyYMD()}">
+    </div>
+    <button class="btn" id="resumenLoteGuardar" style="margin-bottom:10px" onclick="guardarOrdenResumenLote()">💾 Guardar orden y fecha</button>` +
+    (sinCapa.length ? sinCapa.map(p=>`<div class="detect-card" id="resumen-${p.ID}">
       ${fotoRecortadaHtml(p,{estilo:'width:64px;height:64px;object-fit:cover;border-radius:8px', clickable:false})}
-      <div class="fields" style="flex:1"><div class="hint">${escAttr(p.Tipo||p.Categoria)}</div></div>
+      <div class="fields" style="flex:1"><div class="hint">${escAttr(p.Tipo||p.Categoria)} — sin capa para el maniquí</div></div>
       <button class="btn ghost" style="font-size:12px;padding:6px 10px" onclick="abrirEditorPrenda(findPrenda('${p.ID}'),'ajustar')">✏️ Editar</button>
       <button class="remove" onclick="pedirEliminarPrenda('${p.ID}')" title="Eliminar">🗑</button>
-    </div>`).join('');
+    </div>`).join('') : '');
   renderResumenLoteManiqui();
 }
 async function renderResumenLoteManiqui(){
@@ -788,8 +800,10 @@ function renderResumenLoteCapas(){
     return `<div class="capa-row">
       ${fotoRecortadaHtml(p,{estilo:'height:36px;flex:none;border-radius:6px', clickable:false})}
       <div class="capa-row-info">${escAttr(p.Tipo||p.Categoria)}</div>
+      <button class="btn ghost" style="padding:4px 8px" onclick="abrirEditorPrenda(findPrenda('${id}'),'ajustar')" title="Editar imagen">✏️</button>
       <button class="btn ghost" style="padding:4px 8px" ${esUltimo?'disabled':''} onclick="moverCapaResumenLote('${id}',1)" title="Más encima">▲</button>
       <button class="btn ghost" style="padding:4px 8px" ${esPrimero?'disabled':''} onclick="moverCapaResumenLote('${id}',-1)" title="Más abajo">▼</button>
+      <button class="remove" onclick="pedirEliminarPrenda('${id}')" title="Eliminar">🗑</button>
     </div>`;
   }).join('');
 }
@@ -798,6 +812,39 @@ function moverCapaResumenLote(id, delta){
   const nuevo = idx+delta; if(nuevo<0 || nuevo>=ordenResumenLote.length) return;
   [ordenResumenLote[idx], ordenResumenLote[nuevo]] = [ordenResumenLote[nuevo], ordenResumenLote[idx]];
   renderResumenLoteManiqui();
+}
+// Registra el día usado con el orden ya acomodado — mismo criterio que
+// editar un día desde Calendario. Si procesar las fotos de este lote ya
+// creó una sola fila de USOS (fecha puesta por foto), se ACTUALIZA esa
+// misma fila (evita duplicarla); si no había ninguna (nunca se puso
+// fecha) o hubo más de una (fotos con fechas distintas ya registradas
+// por separado), se crea una fila nueva con todo el lote junto.
+async function guardarOrdenResumenLote(){
+  const fechaInput = document.getElementById('resumenLoteFecha');
+  const valorFecha = fechaInput ? fechaInput.value : '';
+  if(!valorFecha){ showToast('Elige una fecha'); return; }
+  const btn = document.getElementById('resumenLoteGuardar');
+  if(btn){ btn.disabled = true; btn.textContent = 'Guardando…'; }
+  try{
+    const fecha = new Date(valorFecha).toISOString();
+    const idsFinal = [...ordenResumenLote, ...prendasDeEsteLote.filter(id=>!ordenResumenLote.includes(id))];
+    if(usosDeEsteLote.length===1){
+      const u = usosDeEsteLote[0];
+      u.PrendaIDsJSON = JSON.stringify(idsFinal);
+      u.Fecha = fecha;
+      await apiPost('saveRow', { table:'USOS', row:u });
+    } else {
+      const r = await apiPost('registrarUso', { prendaIds: idsFinal, fecha });
+      if(r.ok){ DATA.usos.push(r.uso); usosDeEsteLote = [r.uso]; }
+    }
+    idsFinal.forEach(id=>{ const p=findPrenda(id); if(p) p.UltimoUso=fecha; });
+    guardarCacheLocal();
+    renderCalendario();
+    showToast('Guardado en el historial');
+  }catch(e){
+    showToast('Algo falló guardando ('+(e.message||'error inesperado')+') — intenta de nuevo');
+  }
+  if(btn){ btn.disabled = false; btn.textContent = '💾 Guardar orden y fecha'; }
 }
 
 // ── Recorte manual antes de analizar: la IA solo ve lo que el usuario
@@ -930,7 +977,7 @@ async function analizarFotoOrigenExistente(url){
   const r = await apiPost('descargarImagenDrive', { fileId });
   if(!r.ok){ showToast('No se pudo cargar: '+(r.error||'sin conexión')); return; }
   const resized = await imagenDesdeBase64(r.base64, r.mimeType, 1280);
-  uploadQueue = []; uploadIndex = 0; prendasDeEsteLote = [];
+  uploadQueue = []; uploadIndex = 0; prendasDeEsteLote = []; usosDeEsteLote = [];
   document.getElementById('uploadProgressWrap').classList.add('hidden');
   switchTab('subir');
   mostrarRecorteManual(resized, {
@@ -1703,6 +1750,7 @@ async function guardarDetecciones(){
     // la foto de origen ya ES un uso real (si ahí sale puesta), así que
     // ninguna prenda se queda en "0 usos" solo por ser recién creada.
     const fecha = d.fechaFoto ? new Date(d.fechaFoto).toISOString() : undefined;
+    if(d.fechaFoto) ultimaFechaLote = d.fechaFoto;
     const todosLosIds = [];
     for(let i=0;i<d.items.length;i++){
       const it = d.items[i];
@@ -1719,6 +1767,7 @@ async function guardarDetecciones(){
       if(r.ok){
         todosLosIds.forEach(id=>{ const p=findPrenda(id); if(p){ p.VecesUsado=(Number(p.VecesUsado)||0)+1; if(fecha) p.UltimoUso=fecha; } });
         DATA.usos.push(r.uso);
+        usosDeEsteLote.push(r.uso);
       }
     }
     guardarCacheLocal();
@@ -1964,7 +2013,7 @@ async function renderCatalogo(){
     const genero = localStorage.getItem('ropa_maniqui_genero')||'mujer';
     const maniquiInfo = await maniquiConPeinadoHtml(genero);
     if(!document.getElementById('catGrid') || activeCategoria!=='👗 Outfits') return; // se cambió de pantalla/chip mientras cargaba
-    grid.innerHTML = `<div style="display:flex;gap:10px;flex-wrap:wrap">${guardados.map(o=>outfitGuardadoCardHtml(o, maniquiInfo)).join('')}</div>`;
+    grid.innerHTML = guardados.map(o=>outfitGuardadoCardHtml(o, maniquiInfo)).join('');
     return;
   }
   document.getElementById('btnFav').classList.toggle('active', soloFavoritos);
@@ -2394,7 +2443,6 @@ async function abrirEditorPrenda(p, tabInicial){
     </div>
 
     <div id="panelAjustar">
-      <p class="hint" style="text-align:center;margin-top:6px">Arrastra la imagen (o usa las flechas del teclado) para moverla; usa los deslizadores o escribe el número para estirarla — ancho y alto son independientes, no hace falta que sea proporcional.</p>
       ${moldeClave ? `<div class="chips" style="justify-content:center;margin-top:6px">
         <button class="chip" id="ajAplicarMolde" title="Reacomoda esta capa en el molde de '${escAttr(moldeBase(moldeClave).nombre)}' — no usa IA, solo la escala y la mueve">📐 Aplicar molde de "${escAttr(moldeBase(moldeClave).nombre)}"</button>
       </div>` : ''}
@@ -2414,7 +2462,6 @@ async function abrirEditorPrenda(p, tabInicial){
     </div>
 
     <div id="panelBorrador" style="display:none">
-      <p class="hint" style="text-align:center;margin-top:6px">Pinta encima para borrar esa parte (queda transparente) — se ve sobre el maniquí para que sepas exactamente qué falta quitar. Sin IA, tú decides.</p>
       <div class="chips" style="justify-content:center;flex-wrap:wrap;overflow:visible;margin-top:6px">
         <button class="chip active" id="modoLibre">✏️ Trazo libre</button>
         <button class="chip" id="modoLinea">／ Línea recta</button>
@@ -2547,7 +2594,7 @@ async function abrirEditorPrenda(p, tabInicial){
   function manejarTeclaAjuste(e){
     if(tabActual!=='ajustar') return;
     if(document.activeElement && document.activeElement.tagName==='INPUT') return;
-    const paso = e.shiftKey ? 5 : 1;
+    const paso = e.shiftKey ? 2 : 0.3;
     if(e.key==='ArrowUp') ajusteVal.dy -= paso;
     else if(e.key==='ArrowDown') ajusteVal.dy += paso;
     else if(e.key==='ArrowLeft') ajusteVal.dx -= paso;
@@ -3495,7 +3542,7 @@ function outfitGuardadoCardHtml(o, maniquiInfo){
     ? maniquiInfo.html + prendas.map(p=>p.FotoGeneradaURL?`<img class="maniqui-doll-capa-full" src="${p.FotoGeneradaURL}">`:'').join('')
     : '';
   const fechaVal = o.Fecha && !isNaN(new Date(o.Fecha).getTime()) ? new Date(o.Fecha).toISOString().slice(0,10) : '';
-  return `<div class="outfit-card" style="width:220px;flex:0 0 220px">
+  return `<div class="outfit-card" style="max-width:220px">
     <div class="maniqui-doll-wrap" style="max-width:200px">${capas}</div>
     <div class="outfit-items">${prendas.length ? prendas.map(p=>fotoRecortadaHtml(p,{estilo:'height:48px;flex:none'})).join('') : '<p class="hint">Esas prendas ya no están en tu catálogo.</p>'}</div>
     <div class="field" style="margin-top:6px"><label class="hint">Fecha (opcional)</label><input type="date" value="${fechaVal}" onchange="guardarFechaOutfit('${o.ID}', this.value)"></div>
