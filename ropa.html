@@ -354,7 +354,7 @@ let SHEET_URL = '';
 // Nombre-landmark de esta versión — cámbialo en cada cambio que se
 // despliegue, así se puede saber a simple vista (en Perfil) si el
 // celular ya está viendo lo último o una copia vieja en caché.
-const BUILD_VERSION = 'Merida 3';
+const BUILD_VERSION = 'Zacatecas 3';
 let DATA = { prendas: [], usos: [], outfits_sugeridos: [], perfil: [], fotos_origen: [], maniqui_base: [] };
 let showTrash = false;
 let soloFavoritos = false;
@@ -4208,12 +4208,18 @@ async function mejorarOutfitConIA(prendaIds, areaId, btnId){
 // resto lo reusa. Cache local (v4, bumpeado para que los ya generados
 // independientes antes de este cambio no se sigan usando) sigue
 // existiendo solo para no re-descargar en cada carga.
+// Cambiar esto fuerza que TODOS (todo dispositivo, cualquier usuario de
+// este backend) regeneren el maniquí una vez más la próxima vez que lo
+// necesiten, en vez de seguir reusando el resultado viejo guardado en
+// MANIQUI_BASE — bump aquí cada vez que se ajuste el prompt de
+// generarManiquiBase (color, cara, pose, etc.).
+const MANIQUI_BASE_VERSION = 'v2';
 async function obtenerManiquiBase(genero, estatura){
   estatura = estatura || localStorage.getItem('ropa_maniqui_estatura') || 'chaparrita';
-  const cacheKey = 'ropa_maniqui_base_v4_'+genero+'_'+estatura;
+  const cacheKey = 'ropa_maniqui_base_'+MANIQUI_BASE_VERSION+'_'+genero+'_'+estatura;
   const cached = localStorage.getItem(cacheKey);
   if(cached){ try{ return JSON.parse(cached); }catch(e){} }
-  const compartido = DATA.maniqui_base.find(m=>m.Genero===genero && m.Estatura===estatura && m.URL);
+  const compartido = DATA.maniqui_base.find(m=>m.Genero===genero && m.Estatura===estatura && m.Version===MANIQUI_BASE_VERSION && m.URL);
   if(compartido){
     const fileId = fileIdDeUrlDrive(compartido.URL);
     if(fileId){
@@ -4231,7 +4237,7 @@ async function obtenerManiquiBase(genero, estatura){
   const info = { base64: gen.imageBase64, mimeType: gen.mimeType||'image/jpeg', url: subida.ok?subida.url:'' };
   try{ localStorage.setItem(cacheKey, JSON.stringify(info)); }catch(e){}
   if(subida.ok){
-    const fila = { Genero: genero, Estatura: estatura, URL: subida.url, MimeType: info.mimeType };
+    const fila = { Genero: genero, Estatura: estatura, URL: subida.url, MimeType: info.mimeType, Version: MANIQUI_BASE_VERSION };
     const r = await apiPost('saveRow', { table:'MANIQUI_BASE', row: fila });
     if(r.ok){ DATA.maniqui_base.push(r.row); guardarCacheLocal(); }
   }
