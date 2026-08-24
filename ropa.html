@@ -200,13 +200,20 @@ nav.tabbar button .ic{font-size:19px}
 
     <section class="screen" id="screen-hoy">
       <h2>Qué me puse hoy</h2>
+      <div id="hoyPreviewWrap" style="display:none">
+        <div class="maniqui-doll-wrap" id="hoyPreviewSlide" style="max-width:220px;margin:0 auto"></div>
+        <div style="display:flex;justify-content:center;gap:6px;margin-top:6px" id="hoyPreviewDots"></div>
+        <div style="text-align:center;margin-top:6px">
+          <button class="btn ghost" id="hoyPreviewEditar" style="font-size:12px;padding:6px 12px" onclick="hoyPreviewEditarActual()">✏️ Editar</button>
+        </div>
+      </div>
       <div class="field"><label class="hint">Evento (opcional)</label><input type="text" id="hoyEvento" placeholder="Trabajo, cita, casual…"></div>
 
       <input type="file" id="fileInputHoy" accept="image/*" style="display:none" onchange="onFotoHoySeleccionada(this.files)">
       <input type="file" id="fileInputHoyCam" accept="image/*" capture="environment" style="display:none" onchange="onFotoHoySeleccionada(this.files)">
       <div style="display:flex;gap:8px;flex-wrap:wrap">
         <button class="btn secondary" onclick="document.getElementById('fileInputHoy').click()">🖼️ Reconocer (galería)</button>
-        <button class="btn secondary" onclick="document.getElementById('fileInputHoyCam').click()">📷 Reconocer (tomar foto)</button>
+        <button class="btn secondary" onclick="document.getElementById('fileInputHoyCam').click()">📷 Tomar foto</button>
       </div>
       <p class="hint">Sube una foto de lo que traes puesto — la IA la compara contra tu catálogo, así no se duplica lo que ya tienes.</p>
       <div id="hoyReviewArea"></div>
@@ -355,7 +362,7 @@ let SHEET_URL = '';
 // Nombre-landmark de esta versión — cámbialo en cada cambio que se
 // despliegue, así se puede saber a simple vista (en Perfil) si el
 // celular ya está viendo lo último o una copia vieja en caché.
-const BUILD_VERSION = 'Chichen Itza 2';
+const BUILD_VERSION = 'Cozumel 2';
 let DATA = { prendas: [], usos: [], outfits_sugeridos: [], perfil: [], fotos_origen: [], maniqui_base: [] };
 let showTrash = false;
 let soloFavoritos = false;
@@ -3619,6 +3626,7 @@ function renderHoy(){
   }).join('');
   wrap.innerHTML = html || '<p class="hint">Todavía no hay prendas en tu catálogo.</p>';
   renderUsosRecientes();
+  renderHoyPreview();
 }
 function toggleSeleccionHoy(id){ seleccionHoy.has(id) ? seleccionHoy.delete(id) : seleccionHoy.add(id); renderHoy(); }
 async function guardarUsoHoy(){
@@ -3639,6 +3647,55 @@ async function guardarUsoHoy(){
     renderHoy();
     showToast('Registrado');
   } else showToast('No se pudo guardar: '+(r.error||'sin conexión'));
+}
+// Vista previa arriba de "Hoy": foto y/o maniquí de lo YA registrado hoy
+// (pedido explícito) — si hay varios registros de hoy (o alguno con
+// varias fotos), se intercalan foto/maniquí en un carrusel; si ningún
+// registro de hoy tiene foto, solo se ven los maniquíes. El lapicito
+// abre el mismo editor de prendas que ya usa Calendario, apuntando al
+// registro de la lámina que se esté viendo en ese momento.
+let hoyPreviewSlides = [];
+let hoyPreviewIndice = 0;
+async function renderHoyPreview(){
+  const wrap = document.getElementById('hoyPreviewWrap');
+  if(!wrap) return;
+  const hoy = hoyYMD();
+  const usosHoy = DATA.usos.filter(u=> u.Fecha && u.Fecha.slice(0,10)===hoy);
+  if(!usosHoy.length){ wrap.style.display = 'none'; hoyPreviewSlides = []; return; }
+  const genero = localStorage.getItem('ropa_maniqui_genero')||'mujer';
+  const maniquiInfo = await maniquiConPeinadoHtml(genero);
+  if(!document.getElementById('hoyPreviewWrap')) return; // se cambió de pantalla mientras cargaba
+  hoyPreviewSlides = [];
+  usosHoy.forEach(u=>{
+    let ids = []; try{ ids = JSON.parse(u.PrendaIDsJSON||'[]'); }catch(e){}
+    const prendas = ids.map(id=>findPrenda(id)).filter(Boolean);
+    const capasVestidas = prendas.map(p=>p.FotoGeneradaURL?`<img class="maniqui-doll-capa-full" src="${p.FotoGeneradaURL}">`:'').join('');
+    fotosDeUso(u).forEach(url=> hoyPreviewSlides.push({ usoId:u.ID, html:`<img src="${url}" style="width:100%;height:100%;object-fit:cover">` }));
+    if(maniquiInfo.cuerpo && capasVestidas) hoyPreviewSlides.push({ usoId:u.ID, html: maniquiInfo.html+capasVestidas });
+  });
+  if(!hoyPreviewSlides.length){ wrap.style.display = 'none'; return; }
+  wrap.style.display = '';
+  hoyPreviewIndice = 0;
+  renderHoyPreviewSlide();
+}
+function renderHoyPreviewSlide(){
+  if(!hoyPreviewSlides.length) return;
+  hoyPreviewIndice = ((hoyPreviewIndice%hoyPreviewSlides.length)+hoyPreviewSlides.length)%hoyPreviewSlides.length;
+  const cont = document.getElementById('hoyPreviewSlide');
+  if(!cont) return;
+  const slide = hoyPreviewSlides[hoyPreviewIndice];
+  const flechas = hoyPreviewSlides.length>1 ? `
+    <button class="maniqui-arrow left" style="top:50%" onclick="hoyPreviewIndice--;renderHoyPreviewSlide()">‹</button>
+    <button class="maniqui-arrow right" style="top:50%" onclick="hoyPreviewIndice++;renderHoyPreviewSlide()">›</button>` : '';
+  cont.innerHTML = slide.html + flechas;
+  const dots = document.getElementById('hoyPreviewDots');
+  if(dots) dots.innerHTML = hoyPreviewSlides.length>1
+    ? hoyPreviewSlides.map((s,i)=>`<span style="width:6px;height:6px;border-radius:50%;background:${i===hoyPreviewIndice?'var(--accent)':'var(--border)'}"></span>`).join('')
+    : '';
+}
+function hoyPreviewEditarActual(){
+  const slide = hoyPreviewSlides[hoyPreviewIndice];
+  if(slide) editarPrendasDeUso(slide.usoId);
 }
 function renderUsosRecientes(){
   const wrap = document.getElementById('usosRecientes');
@@ -3663,6 +3720,7 @@ function pedirEliminarUso(id){
     // solo (revisa que su contenedor exista), así que no hace falta
     // saber desde cuál pantalla se llamó.
     renderUsosRecientes();
+    renderHoyPreview();
     renderCalendario();
     showToast('Eliminado');
   });
@@ -4665,6 +4723,7 @@ async function cerrarEditarUso(guardar){
     guardarCacheLocal();
     showToast('Prendas actualizadas');
     renderCalendario();
+    renderHoyPreview();
   }
   if(overlay) overlay.remove();
   const vestidorRealPreview = document.getElementById('vestidorPreview-real-tmp');
