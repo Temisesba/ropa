@@ -5876,6 +5876,13 @@ async function onFotoPerfilSeleccionada(fileList){
 //  Arranque
 // ============================================================
 if(!needsSetup()) boot();
+
+// Deep link desde App Completa: abre directo la pestaña "Hoy" (qué me puse hoy).
+window.addEventListener('load', () => {
+  if (location.hash === '#hoy') {
+    setTimeout(() => { try { switchTab('hoy'); } catch (e) {} }, 400);
+  }
+});
 </script>
 </body>
 </html>
