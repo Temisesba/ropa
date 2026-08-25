@@ -372,7 +372,7 @@ let SHEET_URL = '';
 // Nombre-landmark de esta versión — cámbialo en cada cambio que se
 // despliegue, así se puede saber a simple vista (en Perfil) si el
 // celular ya está viendo lo último o una copia vieja en caché.
-const BUILD_VERSION = 'Isla Contoy 3';
+const BUILD_VERSION = 'Isla Mujeres 3';
 let DATA = { prendas: [], usos: [], outfits_sugeridos: [], perfil: [], fotos_origen: [], maniqui_base: [] };
 let showTrash = false;
 let soloFavoritos = false;
@@ -4546,7 +4546,12 @@ async function renderCalendario(){
       </div>
       <details style="padding:0 10px 10px">
         <summary class="hint" style="cursor:pointer">Ver prendas y editar</summary>
-        <div class="field" style="margin-top:8px"><label class="hint">Fecha</label><input type="date" value="${fechaVal}" onchange="guardarFechaUso('${u.ID}', this.value)"></div>
+        <div class="field" style="margin-top:8px"><label class="hint">Fecha</label>
+          <div style="display:flex;gap:6px;align-items:center">
+            <input type="date" id="fechaUso-${u.ID}" value="${fechaVal}" style="flex:1">
+            <button class="btn ghost" style="font-size:12px;padding:6px 10px;flex:none" onclick="guardarFechaUso('${u.ID}', document.getElementById('fechaUso-${u.ID}').value)">💾 Guardar</button>
+          </div>
+        </div>
         <div class="pick-list" style="margin-top:8px;flex-wrap:wrap">${prendas.length?prendas.map(p=>`<div class="pick-item" onclick="abrirVerPrenda('${p.ID}')">${fotoRecortadaHtml(p,{estilo:'width:56px',clickable:false,iconoTam:20})}<div>${escAttr(p.Tipo||p.Categoria)}</div></div>`).join(''):'<p class="hint">Esas prendas ya no están en tu catálogo.</p>'}</div>
         <div style="display:flex;gap:6px;margin-top:6px;flex-wrap:wrap">
           <button class="btn ghost" style="font-size:12px;padding:6px 10px" onclick="agregarFotoDia('${u.ID}')">📷 +Foto</button>
