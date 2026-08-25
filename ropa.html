@@ -372,7 +372,7 @@ let SHEET_URL = '';
 // Nombre-landmark de esta versión — cámbialo en cada cambio que se
 // despliegue, así se puede saber a simple vista (en Perfil) si el
 // celular ya está viendo lo último o una copia vieja en caché.
-const BUILD_VERSION = 'Campeche 4';
+const BUILD_VERSION = 'Campeche 5';
 let DATA = { prendas: [], usos: [], outfits_sugeridos: [], perfil: [], fotos_origen: [], maniqui_base: [] };
 let showTrash = false;
 let soloFavoritos = false;
@@ -426,6 +426,10 @@ const FORMALIDADES = ['Casual','Trabajo','Formal','Deportivo','Fiesta'];
 // Frío y Lluvia). Se guarda como texto separado por comas en p.Clima.
 const CLIMAS_PRENDA = ['Frío','Calor','Lluvia','Cualquiera'];
 const CLIMA_ICONO = { 'Frío':'❄️', 'Calor':'☀️', 'Lluvia':'🌧️', 'Cualquiera':'🌤️' };
+// v(inventario unificado): con qué moneda se pagó la prenda — varía según
+// dónde se compró (a veces MXN, a veces ¥), así que se deja elegible en vez
+// de asumir una sola. Solo etiqueta, sin conversión automática.
+const MONEDAS_ROPA = ['MXN','JPY','USD'];
 
 // Catálogo, Vestidor ("solo prendas"), Hoy, Olvidados, revisión de
 // duplicados: todos muestran la MISMA capa transparente (FotoGeneradaURL,
@@ -527,6 +531,34 @@ async function procesarColaPendiente(){
   if(ok) showToast(`Se guardaron ${ok} cambio(s) pendiente(s)`);
 }
 function setConnBanner(show){ document.getElementById('connBanner').classList.toggle('show', show); }
+
+// Inventario unificado: cuando se guarda un precio real (nuevo o corregido),
+// se manda un espejo ligero a Gastos (su "📦 Inventario" real, con
+// Grupo='Ropa') — Ropa sigue siendo dueña del detalle fino (fotos, IA, veces
+// usada), Gastos solo necesita lo mínimo para verla junto a Alacena/General.
+// Reusa 'ac_conexiones'/'ac_gastos_sesion', las mismas llaves que ya guarda
+// App_Completa en localStorage — mismo origen (temisesba.github.io), así que
+// ya están puestas sin pedirle nada nuevo a Temis aquí. Si no están
+// configuradas, o el POST falla, esto no hace ni dice nada — nunca debe
+// afectar el guardado real de la prenda, que ya pasó antes de llamar esto.
+async function sincronizarConGastos(p){
+  try{
+    const conexiones = JSON.parse(localStorage.getItem('ac_conexiones')||'{}');
+    const gastosUrl = conexiones.gastos;
+    const sesion = localStorage.getItem('ac_gastos_sesion')||'';
+    if(!gastosUrl || !sesion) return;
+    const concepto = [p.Marca, p.Tipo||'Prenda', p.Color].filter(Boolean).join(' ');
+    const body = {
+      action:'syncProductoExterno', sesion,
+      externoId: p.ID, externoOrigen:'Ropa', grupo:'Ropa',
+      concepto, categoria: p.Categoria||'', marca: p.Marca||'',
+      notas: p.Notas||'', precioInd: p.Precio, precioMoneda: p.PrecioMoneda||'MXN',
+      fotoUrl: p.FotoURL||p.FotoRealURL||''
+    };
+    const f = new FormData(); f.append('payload', JSON.stringify(body));
+    await fetch(gastosUrl, { method:'POST', body:f });
+  }catch(e){ console.warn('No se pudo sincronizar con Gastos:', e); }
+}
 
 function finishSetup(){
   const gasUrl = document.getElementById('setupGas').value.trim();
@@ -2238,7 +2270,12 @@ function abrirEditarPrenda(id){
     <div class="field"><label>Color</label><input id="edColor" value="${escAttr(p.Color||'')}"></div>
     <div class="field"><label>Color secundario</label><input id="edColor2" value="${escAttr(p.ColorSecundario||'')}"></div>
     <div class="field"><label>Marca</label><input id="edMarca" value="${escAttr(p.Marca||'')}"></div>
-    <div class="field"><label>Precio</label><input id="edPrecio" type="number" min="0" step="0.01" placeholder="$" value="${escAttr(p.Precio||'')}"></div>
+    <div class="field"><label>Precio</label>
+      <div style="display:flex;gap:6px">
+        <input id="edPrecio" type="number" min="0" step="0.01" placeholder="$" value="${escAttr(p.Precio||'')}" style="flex:1">
+        <select id="edPrecioMoneda" style="width:84px;flex-shrink:0">${MONEDAS_ROPA.map(m=>`<option ${m===(p.PrecioMoneda||'MXN')?'selected':''}>${m}</option>`).join('')}</select>
+      </div>
+    </div>
     <div class="field"><label>Origen</label><input id="edOrigen" placeholder="ej. de dónde la compraste" value="${escAttr(p.Origen||'')}"></div>
     <div class="field"><label>Formalidad</label><select id="edForm"><option value="">Sin definir</option>${FORMALIDADES.map(f=>`<option ${f===p.Formalidad?'selected':''}>${f}</option>`).join('')}</select></div>
     <div class="field"><label>¿Para qué clima? (elige las que apliquen)</label>
@@ -2291,12 +2328,14 @@ function abrirEditarPrenda(id){
     showToast('Foto guardada — usa 🧽 Borrador para quitarle el fondo a mano');
   };
   overlay.querySelector('#edGuardar').onclick = async ()=>{
+    const precioAnterior = p.Precio;
     p.Categoria = overlay.querySelector('#edCat').value;
     p.Tipo = overlay.querySelector('#edTipo').value;
     p.Color = overlay.querySelector('#edColor').value;
     p.ColorSecundario = overlay.querySelector('#edColor2').value;
     p.Marca = overlay.querySelector('#edMarca').value;
     p.Precio = parseFloat(overlay.querySelector('#edPrecio').value) || '';
+    p.PrecioMoneda = overlay.querySelector('#edPrecioMoneda').value;
     p.Origen = overlay.querySelector('#edOrigen').value;
     p.Formalidad = overlay.querySelector('#edForm').value;
     p.Clima = Array.from(overlay.querySelectorAll('.edClima:checked')).map(el=>el.value).join(',');
@@ -2306,6 +2345,7 @@ function abrirEditarPrenda(id){
     await apiPost('saveRow', { table:'PRENDAS', row:p });
     guardarCacheLocal();
     showToast('Guardado');
+    if(p.Precio && p.Precio!==precioAnterior) sincronizarConGastos(p);
   };
 }
 // Botones de fuente de foto: cuáles se muestran depende de qué versiones
