@@ -372,7 +372,7 @@ let SHEET_URL = '';
 // Nombre-landmark de esta versión — cámbialo en cada cambio que se
 // despliegue, así se puede saber a simple vista (en Perfil) si el
 // celular ya está viendo lo último o una copia vieja en caché.
-const BUILD_VERSION = 'Isla Mujeres 3';
+const BUILD_VERSION = 'Merida 4';
 let DATA = { prendas: [], usos: [], outfits_sugeridos: [], perfil: [], fotos_origen: [], maniqui_base: [] };
 let showTrash = false;
 let soloFavoritos = false;
@@ -4656,18 +4656,28 @@ function agregarFotoDia(usoId){
 // guardarFechaFotoOrigen: también actualiza UltimoUso de cada prenda de
 // ese uso, para no dejar el catálogo desincronizado con el historial.
 async function guardarFechaUso(usoId, valorFecha){
-  const u = DATA.usos.find(x=>x.ID===usoId); if(!u || !valorFecha) return;
-  const fecha = new Date(valorFecha).toISOString();
-  u.Fecha = fecha;
-  await apiPost('saveRow', { table:'USOS', row:u });
-  let ids = []; try{ ids = JSON.parse(u.PrendaIDsJSON||'[]'); }catch(e){}
-  for(const id of ids){
-    const p = findPrenda(id);
-    if(p){ p.UltimoUso = fecha; await apiPost('saveRow', { table:'PRENDAS', row:p }); }
+  // Antes se salía en silencio si faltaba la fecha o no se encontraba
+  // el registro — el botón "Guardar" se sentía como que "no pasa nada".
+  // Ahora cada salida avisa algo, y un error real (no solo de red)
+  // tampoco se queda mudo.
+  if(!valorFecha){ showToast('Elige una fecha primero'); return; }
+  const u = DATA.usos.find(x=>x.ID===usoId);
+  if(!u){ showToast('No se encontró ese registro — recarga e intenta de nuevo'); return; }
+  try{
+    const fecha = new Date(valorFecha).toISOString();
+    u.Fecha = fecha;
+    await apiPost('saveRow', { table:'USOS', row:u });
+    let ids = []; try{ ids = JSON.parse(u.PrendaIDsJSON||'[]'); }catch(e){}
+    for(const id of ids){
+      const p = findPrenda(id);
+      if(p){ p.UltimoUso = fecha; await apiPost('saveRow', { table:'PRENDAS', row:p }); }
+    }
+    guardarCacheLocal();
+    showToast('Fecha actualizada');
+    renderCalendario();
+  }catch(e){
+    showToast('Algo falló guardando ('+(e.message||'error inesperado')+') — intenta de nuevo');
   }
-  guardarCacheLocal();
-  showToast('Fecha actualizada');
-  renderCalendario();
 }
 // Agregar/quitar prendas de un día ya registrado — reusa el picker de
 // multi-selección que ya existe (abrirArmarOutfitManual), pre-cargado
