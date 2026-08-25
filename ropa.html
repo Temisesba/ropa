@@ -193,6 +193,16 @@ nav.tabbar button .ic{font-size:19px}
         <button class="btn ghost" onclick="toggleFavoritos()" id="btnFav">⭐ Favoritos</button>
         <button class="btn ghost" onclick="toggleTrash()" id="btnTrash">🗑</button>
       </div>
+      <div class="field" style="margin-top:8px"><label class="hint">Ordenar por</label>
+        <select id="catOrden" onchange="ordenCatalogo=this.value;renderCatalogo()">
+          <option value="nuevo">Más nuevo primero</option>
+          <option value="viejo">Más viejo primero</option>
+          <option value="masUsados">Más usados</option>
+          <option value="menosUsados">Menos usados</option>
+          <option value="categoria">Tipo de prenda</option>
+          <option value="nombre">Nombre</option>
+        </select>
+      </div>
       <div class="chips" id="catChips"></div>
       <div id="papeleraAcciones"></div>
       <div class="grid" id="catGrid"></div>
@@ -362,7 +372,7 @@ let SHEET_URL = '';
 // Nombre-landmark de esta versión — cámbialo en cada cambio que se
 // despliegue, así se puede saber a simple vista (en Perfil) si el
 // celular ya está viendo lo último o una copia vieja en caché.
-const BUILD_VERSION = 'Cozumel 2';
+const BUILD_VERSION = 'Isla Contoy 3';
 let DATA = { prendas: [], usos: [], outfits_sugeridos: [], perfil: [], fotos_origen: [], maniqui_base: [] };
 let showTrash = false;
 let soloFavoritos = false;
@@ -782,7 +792,7 @@ function mostrarResumenLote(){
     (sinCapa.length ? sinCapa.map(p=>`<div class="detect-card" id="resumen-${p.ID}">
       ${fotoRecortadaHtml(p,{estilo:'width:64px;height:64px;object-fit:cover;border-radius:8px', clickable:false})}
       <div class="fields" style="flex:1"><div class="hint">${escAttr(p.Tipo||p.Categoria)} — sin capa para el maniquí</div></div>
-      <button class="btn ghost" style="font-size:12px;padding:6px 10px" onclick="abrirEditorPrenda(findPrenda('${p.ID}'),'ajustar')">✏️ Editar</button>
+      <button class="btn ghost" style="font-size:12px;padding:6px 10px" onclick="abrirAccionesPrenda(findPrenda('${p.ID}'))">✋ Editar</button>
       <button class="remove" onclick="pedirEliminarPrenda('${p.ID}')" title="Eliminar">🗑</button>
     </div>`).join('') : '');
   renderResumenLoteManiqui();
@@ -808,7 +818,7 @@ function renderResumenLoteCapas(){
     return `<div class="capa-row">
       ${fotoRecortadaHtml(p,{estilo:'height:36px;flex:none;border-radius:6px', clickable:false})}
       <div class="capa-row-info">${escAttr(p.Tipo||p.Categoria)}</div>
-      <button class="btn ghost" style="padding:4px 8px" onclick="abrirEditorPrenda(findPrenda('${id}'),'ajustar')" title="Editar imagen">✏️</button>
+      <button class="btn ghost" style="padding:4px 8px" onclick="abrirAccionesPrenda(findPrenda('${id}'))" title="Editar imagen o prenda">✋</button>
       <button class="btn ghost" style="padding:4px 8px" ${esUltimo?'disabled':''} onclick="moverCapaResumenLote('${id}',1)" title="Más encima">▲</button>
       <button class="btn ghost" style="padding:4px 8px" ${esPrimero?'disabled':''} onclick="moverCapaResumenLote('${id}',-1)" title="Más abajo">▼</button>
       <button class="remove" onclick="pedirEliminarPrenda('${id}')" title="Eliminar">🗑</button>
@@ -2007,6 +2017,20 @@ async function guardarRecortesHoy(){
 // ============================================================
 //  Catálogo
 // ============================================================
+let ordenCatalogo = 'nuevo';
+// String(...) alrededor de cada campo antes de comparar/ordenar — Sheets
+// devuelve celdas que "parecen número" (ej. un Tipo tipo "501") como
+// number de JS, no string, y .localeCompare truena si el valor no es un
+// string de verdad.
+function ordenarItemsCatalogo(items){
+  const arr = items.slice();
+  if(ordenCatalogo==='viejo') return arr.sort((a,b)=> new Date(a.FechaAlta||0).getTime() - new Date(b.FechaAlta||0).getTime());
+  if(ordenCatalogo==='masUsados') return arr.sort((a,b)=> (Number(b.VecesUsado)||0) - (Number(a.VecesUsado)||0));
+  if(ordenCatalogo==='menosUsados') return arr.sort((a,b)=> (Number(a.VecesUsado)||0) - (Number(b.VecesUsado)||0));
+  if(ordenCatalogo==='categoria') return arr.sort((a,b)=> String(a.Categoria||'').localeCompare(String(b.Categoria||'')) || String(a.Tipo||'').localeCompare(String(b.Tipo||'')));
+  if(ordenCatalogo==='nombre') return arr.sort((a,b)=> String(a.Tipo||a.Categoria||'').localeCompare(String(b.Tipo||b.Categoria||'')));
+  return arr.sort((a,b)=> new Date(b.FechaAlta||0).getTime() - new Date(a.FechaAlta||0).getTime()); // 'nuevo' (por defecto)
+}
 function toggleTrash(){ showTrash = !showTrash; document.getElementById('btnTrash').classList.toggle('active', showTrash); renderCatalogo(); }
 function toggleFavoritos(){ soloFavoritos = !soloFavoritos; renderCatalogo(); }
 function diasDesde(fechaISO){
@@ -2040,6 +2064,7 @@ async function renderCatalogo(){
   if(activeCategoria!=='Todas') items = items.filter(p=>p.Categoria===activeCategoria);
   if(soloFavoritos) items = items.filter(p=>esVerdadero(p.Favorito));
   if(q) items = items.filter(p=> [p.Tipo,p.Color,p.Marca,p.ColorSecundario].join(' ').toLowerCase().includes(q));
+  items = ordenarItemsCatalogo(items);
   const grid = document.getElementById('catGrid');
   if(!items.length){
     const vacioMsg = showTrash ? 'La papelera está vacía.' : soloFavoritos ? 'Todavía no marcaste ninguna prenda como favorita.' : 'Todavía no hay prendas aquí — sube fotos para empezar.';
