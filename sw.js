@@ -2,7 +2,7 @@
 // Mismo patrón que ORGANIZADOR/sw.js: cache:'no-store' en el documento
 // principal para que la app instalada nunca se quede viendo una copia
 // vieja (ver memoria bug_pattern_pwa_cache_first_stale).
-const CACHE_NAME = 'ropa-shell-v2';
+const CACHE_NAME = 'ropa-shell-v3';
 const SHELL_FILE = 'ropa.html';
 
 self.addEventListener('install', () => { self.skipWaiting(); });

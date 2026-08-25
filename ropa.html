@@ -372,7 +372,7 @@ let SHEET_URL = '';
 // Nombre-landmark de esta versión — cámbialo en cada cambio que se
 // despliegue, así se puede saber a simple vista (en Perfil) si el
 // celular ya está viendo lo último o una copia vieja en caché.
-const BUILD_VERSION = 'Campeche 5';
+const BUILD_VERSION = 'Campeche 6';
 let DATA = { prendas: [], usos: [], outfits_sugeridos: [], perfil: [], fotos_origen: [], maniqui_base: [] };
 let showTrash = false;
 let soloFavoritos = false;
@@ -552,6 +552,7 @@ async function sincronizarConGastos(p){
       action:'syncProductoExterno', sesion,
       externoId: p.ID, externoOrigen:'Ropa', grupo:'Ropa',
       concepto, categoria: p.Categoria||'', marca: p.Marca||'',
+      tienda: p.Origen||'', // "Origen" en Ropa ya es "de dónde la compraste" — mismo concepto que Tienda en Gastos
       notas: p.Notas||'', precioInd: p.Precio, precioMoneda: p.PrecioMoneda||'MXN',
       fotoUrl: p.FotoURL||p.FotoRealURL||''
     };
