@@ -372,7 +372,7 @@ let SHEET_URL = '';
 // Nombre-landmark de esta versión — cámbialo en cada cambio que se
 // despliegue, así se puede saber a simple vista (en Perfil) si el
 // celular ya está viendo lo último o una copia vieja en caché.
-const BUILD_VERSION = 'Xel-Ha 3';
+const BUILD_VERSION = 'Bacalar 1';
 let DATA = { prendas: [], usos: [], outfits_sugeridos: [], perfil: [], fotos_origen: [], maniqui_base: [] };
 let showTrash = false;
 let soloFavoritos = false;
@@ -725,6 +725,7 @@ function onFilesSelected(fileList){
   prendasDeEsteLote = [];
   usosDeEsteLote = [];
   ultimaFechaLote = '';
+  pendientesSinIA = [];
   if(!uploadQueue.length) return;
   document.getElementById('uploadProgressWrap').classList.remove('hidden');
   procesarSiguienteFoto();
@@ -768,63 +769,79 @@ async function procesarSiguienteFoto(){
   const resized = await resizeImageFile(uploadQueue[uploadIndex], 1280, 0.85);
   mostrarRecorteManual(resized, { containerId:'reviewArea', onListo: analizarFotoRecortada, onDescartar: omitirFoto, onListoSinIA: crearPrendaManualDesdeFoto });
 }
-function omitirFoto(){ cleanupCropListeners(); uploadIndex++; procesarSiguienteFoto(); }
+function omitirFoto(){ cleanupCropListeners(); pendientesSinIA = []; uploadIndex++; procesarSiguienteFoto(); }
 function reintentarFoto(){ if(lastCropped) analizarFotoRecortada(lastCropped); else procesarSiguienteFoto(); }
 // "🖐️ Sin IA" en Subir fotos — en vez de extraerPrendas (detección
 // general), pide categoría/tipo a mano y crea la prenda directo con
 // crearPrendaSinIA (cero llamadas a Gemini) — para cuando la usuaria ya
 // tiene una imagen que le gusta y no quiere gastar créditos en que la
 // IA la vuelva a interpretar.
+// Pedido explícito: "que se vea la foto" y "elegir más de una prenda" —
+// se muestra el recorte arriba del formulario, y en vez de guardar y
+// preguntar si hay otra (una a la vez), se arma una lista
+// (pendientesSinIA) de {recortada,categoria,tipo} — "Agregar y recortar
+// otra" reabre el recorte sobre la MISMA foto para la siguiente prenda,
+// y "Guardar" al final las manda TODAS juntas.
+let pendientesSinIA = [];
+let manualRecortadaActual = null;
 function crearPrendaManualDesdeFoto(recortada){
+  manualRecortadaActual = recortada;
   const area = document.getElementById('reviewArea');
   if(!area) return;
+  const listaHtml = pendientesSinIA.length ? `<p class="hint">Ya agregadas (${pendientesSinIA.length}):</p>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px">${pendientesSinIA.map((it,i)=>`
+      <div style="position:relative">
+        <img src="${it.recortada.dataUrl}" style="width:48px;height:48px;object-fit:cover;border-radius:6px">
+        <button onclick="quitarPendienteSinIA(${i})" title="Quitar" style="position:absolute;top:-6px;right:-6px;background:#c0392b;color:#fff;border:none;border-radius:50%;width:18px;height:18px;font-size:11px;line-height:1;cursor:pointer">✕</button>
+      </div>`).join('')}</div>` : '';
   area.innerHTML = `<p class="hint">Foto lista — dile a la app qué es (sin usar IA):</p>
+    <img src="${recortada.dataUrl}" style="max-width:160px;max-height:160px;object-fit:contain;border-radius:8px;display:block;margin-bottom:10px">
+    ${listaHtml}
     <div class="field"><label>Categoría</label><select id="manualCat">${CATEGORIAS.map(c=>`<option>${escAttr(c)}</option>`).join('')}</select></div>
     <div class="field"><label>Tipo (opcional)</label><input id="manualTipo" placeholder="ej: reloj, blusa azul"></div>
     <div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap">
       <button class="btn secondary" onclick="omitirFoto()">Descartar foto</button>
-      <button class="btn" id="manualGuardarBtn">💾 Guardar sin IA</button>
+      <button class="btn ghost" id="manualOtraBtn">➕ Agregar y recortar otra</button>
+      <button class="btn" id="manualGuardarBtn">💾 Guardar${pendientesSinIA.length ? ' todas ('+(pendientesSinIA.length+1)+')' : ''}</button>
     </div>`;
-  document.getElementById('manualGuardarBtn').onclick = ()=> guardarPrendaManualDesdeFoto(recortada);
+  document.getElementById('manualOtraBtn').onclick = ()=> agregarPendienteSinIA(recortada, true);
+  document.getElementById('manualGuardarBtn').onclick = ()=> agregarPendienteSinIA(recortada, false);
 }
-async function guardarPrendaManualDesdeFoto(recortada){
+function quitarPendienteSinIA(i){
+  pendientesSinIA.splice(i,1);
+  crearPrendaManualDesdeFoto(manualRecortadaActual);
+}
+function agregarPendienteSinIA(recortada, seguirRecortando){
   const categoria = document.getElementById('manualCat').value;
   const tipo = document.getElementById('manualTipo').value.trim();
-  const btn = document.getElementById('manualGuardarBtn');
-  if(btn){ btn.disabled = true; btn.textContent = 'Guardando…'; }
-  const subOrigen = await apiPost('uploadImage', { imageBase64: recortada.base64, mimeType: recortada.mimeType, fileName:'manual-origen-'+Date.now()+'.jpg' });
-  const origenUrl = subOrigen.ok ? subOrigen.url : '';
-  if(origenUrl) await registrarFotoOrigenSiFalta(origenUrl);
-  const row = await crearPrendaSinIA({ categoria, tipo, cropPreview: recortada.dataUrl }, origenUrl);
-  await apiPost('saveRow', { table:'PRENDAS', row });
-  DATA.prendas.push(row);
-  const r = await apiPost('registrarUso', { prendaIds:[row.ID], fotoUrl: origenUrl });
-  if(r.ok){ row.VecesUsado = 1; DATA.usos.push(r.uso); }
-  guardarCacheLocal();
-  prendasDeEsteLote.push(row.ID);
-  showToast(row.FotoGeneradaURL ? '✓ Guardada — usa 🧽 Borrador para quitarle el fondo' : '✓ Guardada (intenta ajustarla desde Editar prenda)');
-  ofrecerOtraPrendaSinIA();
+  pendientesSinIA.push({ recortada, categoria, tipo });
+  if(seguirRecortando && cropState && cropState.resized){
+    mostrarRecorteManual(cropState.resized, { containerId:'reviewArea', onListo: analizarFotoRecortada, onDescartar: omitirFoto, onListoSinIA: crearPrendaManualDesdeFoto });
+  } else {
+    guardarTodasPendientesSinIA();
+  }
 }
-// Pedido explícito: "si es un outfit pues es más de uno" — antes, tras
-// guardar UNA prenda "sin IA" desde una foto, se pasaba directo a la
-// SIGUIENTE foto de la cola. Ahora ofrece recortar otra prenda de esa
-// MISMA foto (ej. la playera, luego el pantalón, luego los zapatos, los
-// 3 de una sola foto de outfit) antes de avanzar. `cropState.resized`
-// ya guarda la foto original completa (no se limpia después de
-// recortar), así que reabrir el recorte no necesita volver a pedirla.
-function ofrecerOtraPrendaSinIA(){
+async function guardarTodasPendientesSinIA(){
   const area = document.getElementById('reviewArea');
-  if(!area || !cropState || !cropState.resized){ uploadIndex++; procesarSiguienteFoto(); return; }
-  const resizedOriginal = cropState.resized;
-  area.innerHTML = `<p class="hint">¿Hay otra prenda en esta misma foto? (ej. el resto del outfit)</p>
-    <div style="display:flex;gap:8px;flex-wrap:wrap">
-      <button class="btn" id="otraPrendaBtn">➕ Recortar otra prenda de esta foto</button>
-      <button class="btn secondary" id="siguienteFotoBtn">➡️ No, siguiente foto</button>
-    </div>`;
-  document.getElementById('otraPrendaBtn').onclick = ()=>{
-    mostrarRecorteManual(resizedOriginal, { containerId:'reviewArea', onListo: analizarFotoRecortada, onDescartar: omitirFoto, onListoSinIA: crearPrendaManualDesdeFoto });
-  };
-  document.getElementById('siguienteFotoBtn').onclick = ()=>{ uploadIndex++; procesarSiguienteFoto(); };
+  const items = pendientesSinIA; pendientesSinIA = [];
+  area.innerHTML = `<p class="hint">Guardando ${items.length} prenda${items.length>1?'s':''}…</p>`;
+  let ultimaGuardada = null;
+  for(const it of items){
+    const subOrigen = await apiPost('uploadImage', { imageBase64: it.recortada.base64, mimeType: it.recortada.mimeType, fileName:'manual-origen-'+Date.now()+'.jpg' });
+    const origenUrl = subOrigen.ok ? subOrigen.url : '';
+    if(origenUrl) await registrarFotoOrigenSiFalta(origenUrl);
+    const row = await crearPrendaSinIA({ categoria: it.categoria, tipo: it.tipo, cropPreview: it.recortada.dataUrl }, origenUrl);
+    await apiPost('saveRow', { table:'PRENDAS', row });
+    DATA.prendas.push(row);
+    const r = await apiPost('registrarUso', { prendaIds:[row.ID], fotoUrl: origenUrl });
+    if(r.ok){ row.VecesUsado = 1; DATA.usos.push(r.uso); }
+    prendasDeEsteLote.push(row.ID);
+    ultimaGuardada = row;
+  }
+  guardarCacheLocal();
+  showToast(items.length>1 ? `✓ ${items.length} prendas guardadas` : (ultimaGuardada && ultimaGuardada.FotoGeneradaURL ? '✓ Guardada — usa 🧽 Borrador para quitarle el fondo' : '✓ Guardada (intenta ajustarla desde Editar prenda)'));
+  uploadIndex++;
+  procesarSiguienteFoto();
 }
 // Al terminar el lote: todas las prendas creadas/confirmadas quedan a un
 // toque de distancia para ajustar/recortar/eliminar, sin ir a Catálogo.
