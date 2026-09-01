@@ -372,7 +372,7 @@ let SHEET_URL = '';
 // Nombre-landmark de esta versión — cámbialo en cada cambio que se
 // despliegue, así se puede saber a simple vista (en Perfil) si el
 // celular ya está viendo lo último o una copia vieja en caché.
-const BUILD_VERSION = 'Chiapas 4';
+const BUILD_VERSION = 'Sian Kaan 3';
 let DATA = { prendas: [], usos: [], outfits_sugeridos: [], perfil: [], fotos_origen: [], maniqui_base: [] };
 let showTrash = false;
 let soloFavoritos = false;
@@ -4242,13 +4242,35 @@ function refrescarVestidorDOM(){
 function renderCapasLista(){
   const cont = document.getElementById('capasListaOutfit');
   if(!cont) return;
-  const items = outfitBoard.capas.map(id=>findPrenda(id)).filter(Boolean);
-  if(!items.length){ cont.innerHTML = '<p class="hint">Todavía no agregaste ninguna prenda.</p>'; return; }
+  if(!outfitBoard.capas.length){ cont.innerHTML = '<p class="hint">Todavía no agregaste ninguna prenda.</p>'; return; }
   cont.innerHTML = '<p class="hint">Orden de las capas (la de más arriba tapa a las de abajo):</p>' +
-    items.slice().reverse().map(p=>{
-      const idx = outfitBoard.capas.indexOf(p.ID);
+    outfitBoard.capas.slice().reverse().map(id=>{
+      const idx = outfitBoard.capas.indexOf(id);
       const esUltimo = idx === outfitBoard.capas.length-1;
       const esPrimero = idx === 0;
+      // "nada" (deslizada hasta el final del carrusel) — antes esta fila
+      // desaparecía por completo de la lista (findPrenda regresa
+      // undefined a propósito para un centinela), lo que se sentía como
+      // que "se rompió" en vez de un estado a propósito. Pedido
+      // explícito: mantener "nada" en el ciclo, pero que quede CLARO que
+      // sigue ahí — se muestra igual, con su propio ‹›  para poder
+      // volver a una prenda real sin tener que buscar las flechas
+      // flotantes sobre el maniquí.
+      if(esNinguno(id)){
+        const categoria = categoriaDeNinguno(id);
+        return `<div class="capa-row" style="flex-wrap:wrap;opacity:.7">
+          <div style="width:44px;height:44px;flex:none;border-radius:8px;background:var(--accent-soft);display:flex;align-items:center;justify-content:center;font-size:18px">🚫</div>
+          <div class="capa-row-info"><i>Sin ${escAttr(categoria)} — desliza ‹› para elegir una</i></div>
+          <button class="btn ghost" style="padding:4px 8px" onclick="cambiarPrendaCarrusel('${id}',-1)" title="Prenda anterior de ${escAttr(categoria)}">‹</button>
+          <button class="btn ghost" style="padding:4px 8px" onclick="abrirFiltroCarrusel('${escAttr(categoria)}')" title="Elegir cuáles ${escAttr(categoria)} mostrar al deslizar">🔍</button>
+          <button class="btn ghost" style="padding:4px 8px" onclick="cambiarPrendaCarrusel('${id}',1)" title="Siguiente prenda de ${escAttr(categoria)}">›</button>
+          <button class="btn ghost" style="padding:4px 8px" ${esUltimo?'disabled':''} onclick="moverCapaOutfit('${id}',1)" title="Más encima">▲</button>
+          <button class="btn ghost" style="padding:4px 8px" ${esPrimero?'disabled':''} onclick="moverCapaOutfit('${id}',-1)" title="Más abajo">▼</button>
+          <button class="remove" onclick="quitarCapaOutfit('${id}')" title="Quitar del outfit">🗑</button>
+        </div>`;
+      }
+      const p = findPrenda(id);
+      if(!p) return '';
       const sinCapa = !p.FotoGeneradaURL;
       const otras = itemsPorCategoria(p.Categoria).length>1;
       return `<div class="capa-row" style="flex-wrap:wrap">
