@@ -372,7 +372,7 @@ let SHEET_URL = '';
 // Nombre-landmark de esta versión — cámbialo en cada cambio que se
 // despliegue, así se puede saber a simple vista (en Perfil) si el
 // celular ya está viendo lo último o una copia vieja en caché.
-const BUILD_VERSION = 'Sian Kaan 3';
+const BUILD_VERSION = 'Cenote Azul 4';
 let DATA = { prendas: [], usos: [], outfits_sugeridos: [], perfil: [], fotos_origen: [], maniqui_base: [] };
 let showTrash = false;
 let soloFavoritos = false;
@@ -4276,10 +4276,10 @@ function renderCapasLista(){
       return `<div class="capa-row" style="flex-wrap:wrap">
         ${fotoRecortadaHtml(p,{estilo:'height:44px;flex:none;border-radius:8px', clickable:false})}
         <div class="capa-row-info">${escAttr(p.Tipo||p.Categoria)}${sinCapa?`<br><span class="hint" style="color:var(--accent)">⚠️ Todavía no tiene capa para el Vestidor (no se dibuja sobre el maniquí). <a href="javascript:void(0)" onclick="abrirEditarPrenda('${p.ID}')">Regenerar</a></span>`:''}</div>
+        ${!sinCapa?`<button class="btn ghost" style="padding:4px 8px" onclick="abrirAccionesPrenda(findPrenda('${p.ID}'))" title="Ajustar, borrador, molde y más para esta prenda">✋</button>`:''}
         ${otras?`<button class="btn ghost" style="padding:4px 8px" onclick="cambiarPrendaCarrusel('${p.ID}',-1)" title="Prenda anterior de ${escAttr(p.Categoria)}">‹</button>
         <button class="btn ghost" style="padding:4px 8px" onclick="abrirFiltroCarrusel('${escAttr(p.Categoria)}')" title="Elegir cuáles ${escAttr(p.Categoria)} mostrar al deslizar${filtroCarrusel[p.Categoria]&&filtroCarrusel[p.Categoria].length?' ('+filtroCarrusel[p.Categoria].length+' elegidas)':''}">🔍${filtroCarrusel[p.Categoria]&&filtroCarrusel[p.Categoria].length?' '+filtroCarrusel[p.Categoria].length:''}</button>
         <button class="btn ghost" style="padding:4px 8px" onclick="cambiarPrendaCarrusel('${p.ID}',1)" title="Siguiente prenda de ${escAttr(p.Categoria)}">›</button>`:''}
-        ${!sinCapa?`<button class="btn ghost" style="padding:4px 8px" onclick="abrirAccionesPrenda(findPrenda('${p.ID}'))" title="Ajustar, borrador, molde y más para esta prenda">✋</button>`:''}
         <button class="btn ghost" style="padding:4px 8px" ${esUltimo?'disabled':''} onclick="moverCapaOutfit('${p.ID}',1)" title="Más encima">▲</button>
         <button class="btn ghost" style="padding:4px 8px" ${esPrimero?'disabled':''} onclick="moverCapaOutfit('${p.ID}',-1)" title="Más abajo">▼</button>
         <button class="remove" onclick="quitarCapaOutfit('${p.ID}')" title="Quitar del outfit">🗑</button>
