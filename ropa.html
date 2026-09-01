@@ -372,7 +372,7 @@ let SHEET_URL = '';
 // Nombre-landmark de esta versión — cámbialo en cada cambio que se
 // despliegue, así se puede saber a simple vista (en Perfil) si el
 // celular ya está viendo lo último o una copia vieja en caché.
-const BUILD_VERSION = 'Bacalar 1';
+const BUILD_VERSION = 'Bacalar 2';
 let DATA = { prendas: [], usos: [], outfits_sugeridos: [], perfil: [], fotos_origen: [], maniqui_base: [] };
 let showTrash = false;
 let soloFavoritos = false;
@@ -816,7 +816,12 @@ function agregarPendienteSinIA(recortada, seguirRecortando){
   const tipo = document.getElementById('manualTipo').value.trim();
   pendientesSinIA.push({ recortada, categoria, tipo });
   if(seguirRecortando && cropState && cropState.resized){
-    mostrarRecorteManual(cropState.resized, { containerId:'reviewArea', onListo: analizarFotoRecortada, onDescartar: omitirFoto, onListoSinIA: crearPrendaManualDesdeFoto });
+    mostrarRecorteManual(cropState.resized, {
+      containerId:'reviewArea', onListo: analizarFotoRecortada, onDescartar: omitirFoto, onListoSinIA: crearPrendaManualDesdeFoto,
+      forzarSinIA: true,
+      rectInicial: { x:0.28, y:0.15, w:0.44, h:0.4 },
+      instruccion: 'Ahora ajusta el cuadro para encerrar SOLO la SIGUIENTE prenda (ej. el pantalón, la blusa, el suéter) — muévelo y achícalo/agrándalo con las esquinas hasta dejar afuera todo lo demás.'
+    });
   } else {
     guardarTodasPendientesSinIA();
   }
@@ -956,10 +961,20 @@ async function guardarOrdenResumenLote(){
 let cropState = null;
 let lastCropped = null;
 function clamp(v,min,max){ return Math.min(max, Math.max(min, v)); }
-function mostrarRecorteManual(resized, { containerId, onListo, onDescartar, onListoSinIA }){
-  cropState = { resized, containerId, onListo, onDescartar, onListoSinIA, rect: { x:0.08, y:0.08, w:0.84, h:0.84 }, mode:null, startPointer:null, startRect:null };
+// rectInicial/instruccion/forzarSinIA: usados al encadenar varios
+// recortes de la MISMA foto (una prenda por recorte, ver
+// agregarPendienteSinIA) — pedido explícito: antes, el cuadro por
+// default cubría ~84% de la foto (casi toda), así que si no se movía a
+// mano cada prenda terminaba con básicamente la foto completa y todas
+// se veían iguales. Aquí se arranca con un cuadro más chico y
+// descentrado (obliga a notar que hay que ajustarlo) + un texto que
+// dice explícito qué prenda encerrar, y se oculta "Usar foto completa"
+// (encimaría la MISMA foto entera otra vez, justo lo que se quiere
+// evitar) forzando directo el modo sin IA sin pasar por el checkbox.
+function mostrarRecorteManual(resized, { containerId, onListo, onDescartar, onListoSinIA, rectInicial, instruccion, forzarSinIA }){
+  cropState = { resized, containerId, onListo, onDescartar, onListoSinIA, forzarSinIA, rect: rectInicial || { x:0.08, y:0.08, w:0.84, h:0.84 }, mode:null, startPointer:null, startRect:null };
   document.getElementById(containerId).innerHTML = `
-    <p class="hint">Recorta la foto para que la IA solo analice lo que dejes dentro del cuadro.</p>
+    <p class="hint">${instruccion || 'Recorta la foto para que la IA solo analice lo que dejes dentro del cuadro.'}</p>
     <div class="crop-wrap" id="cropWrap">
       <img id="cropImg" src="${resized.dataUrl}" draggable="false">
       <div class="crop-box" id="cropBox">
@@ -969,19 +984,28 @@ function mostrarRecorteManual(resized, { containerId, onListo, onDescartar, onLi
         <div class="crop-handle" data-corner="se"></div>
       </div>
     </div>
-    ${onListoSinIA ? `<label class="hint" style="display:flex;gap:8px;align-items:center;margin-top:10px;cursor:pointer">
-      <input type="checkbox" id="cropSinIA" style="width:auto">
-      🖐️ Sin IA — yo elijo la categoría, tú le quitas el fondo después
+    ${onListoSinIA && !forzarSinIA ? `<label class="hint" style="display:flex;gap:8px;align-items:center;margin-top:10px;cursor:pointer">
+      <input type="checkbox" id="cropSinIA" style="width:auto" onchange="onCropSinIAToggle(this)">
+      🖐️ Sin IA — yo elijo la categoría, tú le quitas el fondo después (ajusta el cuadro a UNA sola prenda)
     </label>` : ''}
     <div style="display:flex;gap:8px;margin-top:14px;flex-wrap:wrap">
       <button class="btn secondary" onclick="cropState.onDescartar()">Descartar foto</button>
       <button class="btn" onclick="confirmarRecorte()">Recortar y analizar</button>
-      <button class="btn ghost" onclick="usarFotoCompleta()">Usar foto completa</button>
+      ${forzarSinIA ? '' : `<button class="btn ghost" onclick="usarFotoCompleta()">Usar foto completa</button>`}
     </div>`;
   posicionarCropBox();
   document.getElementById('cropBox').addEventListener('pointerdown', onCropPointerDown);
   window.addEventListener('pointermove', onCropPointerMove);
   window.addEventListener('pointerup', onCropPointerUp);
+}
+// Al marcar "Sin IA" en el primer recorte de una foto, encoge el cuadro
+// (que por default cubre ~84% de la foto) a algo claramente más chico —
+// pista visual de que hay que encerrar SOLO una prenda, no dejarlo como
+// estaba (que terminaba guardando básicamente la foto completa).
+function onCropSinIAToggle(chk){
+  if(!cropState || !chk.checked) return;
+  cropState.rect = { x:0.28, y:0.15, w:0.44, h:0.4 };
+  posicionarCropBox();
 }
 function posicionarCropBox(){
   const box = document.getElementById('cropBox'); if(!box) return;
@@ -1021,14 +1045,14 @@ function cleanupCropListeners(){
   window.removeEventListener('pointerup', onCropPointerUp);
 }
 function usarFotoCompleta(){
-  const { onListo, onListoSinIA, resized } = cropState;
-  const sinIA = onListoSinIA && document.getElementById('cropSinIA') && document.getElementById('cropSinIA').checked;
+  const { onListo, onListoSinIA, resized, forzarSinIA } = cropState;
+  const sinIA = forzarSinIA || (onListoSinIA && document.getElementById('cropSinIA') && document.getElementById('cropSinIA').checked);
   cleanupCropListeners();
   (sinIA ? onListoSinIA : onListo)(resized);
 }
 function confirmarRecorte(){
-  const { resized, rect, onListo, onListoSinIA } = cropState;
-  const sinIA = onListoSinIA && document.getElementById('cropSinIA') && document.getElementById('cropSinIA').checked;
+  const { resized, rect, onListo, onListoSinIA, forzarSinIA } = cropState;
+  const sinIA = forzarSinIA || (onListoSinIA && document.getElementById('cropSinIA') && document.getElementById('cropSinIA').checked);
   cleanupCropListeners();
   const sx = Math.round(rect.x * resized.width);
   const sy = Math.round(rect.y * resized.height);
