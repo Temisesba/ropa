@@ -372,7 +372,7 @@ let SHEET_URL = '';
 // Nombre-landmark de esta versión — cámbialo en cada cambio que se
 // despliegue, así se puede saber a simple vista (en Perfil) si el
 // celular ya está viendo lo último o una copia vieja en caché.
-const BUILD_VERSION = 'Campeche 6';
+const BUILD_VERSION = 'Chiapas 4';
 let DATA = { prendas: [], usos: [], outfits_sugeridos: [], perfil: [], fotos_origen: [], maniqui_base: [] };
 let showTrash = false;
 let soloFavoritos = false;
@@ -4022,6 +4022,61 @@ function outfitGuardadoCardHtml(o, maniquiInfo){
 let outfitBoard = null; // { capas: [ids en orden, de abajo hacia arriba] }
 function prendasActivas(){ return DATA.prendas.filter(p=>!esVerdadero(p.Papelera)); }
 function itemsPorCategoria(cat){ return prendasActivas().filter(p=>p.Categoria===cat); }
+// Filtro del carrusel ‹› por categoría — pedido explícito: "para cuando
+// esté entre 3 o 4 prendas, al cambiar solo cambie entre esas" (no
+// pasar por TODO el catálogo de esa categoría cada vez que desliza).
+// Solo vive en esta sesión del Vestidor (como outfitBoard) y SOLO afecta
+// el carrusel — itemsPorCategoria() en sí no se toca, así que "Agregar
+// prenda", Hoy, etc. siguen viendo el catálogo completo sin sorpresas.
+let filtroCarrusel = {};
+function itemsCarruselCategoria(cat){
+  const todos = itemsPorCategoria(cat);
+  const filtro = filtroCarrusel[cat];
+  if(!filtro || !filtro.length) return todos;
+  const filtrados = todos.filter(p=>filtro.includes(p.ID));
+  return filtrados.length ? filtrados : todos; // si se eliminaron/quedaron sin capa las marcadas, no se queda vacío
+}
+function abrirFiltroCarrusel(categoria){
+  const items = itemsPorCategoria(categoria);
+  if(items.length<2) return;
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay';
+  overlay.id = 'filtroCarruselOverlay';
+  overlay.innerHTML = `<div class="modal">
+    <h3>¿Cuáles ${escAttr(categoria)} quieres ver al deslizar ‹›?</h3>
+    <p class="hint">Marca solo las que te interesan ahora — sin ninguna marcada, el carrusel pasa por todo el catálogo de esta categoría como siempre.</p>
+    <div class="grid" id="filtroCarruselGrid"></div>
+    <div class="actions">
+      <button class="btn ghost" id="filtroCarruselQuitar">Quitar filtro (ver todas)</button>
+      <button class="btn" id="filtroCarruselListo">Listo</button>
+    </div>
+  </div>`;
+  document.body.appendChild(overlay);
+  overlay.addEventListener('click', e=>{ if(e.target===overlay) overlay.remove(); });
+  overlay.querySelector('#filtroCarruselListo').onclick = ()=>{ overlay.remove(); renderCapasLista(); };
+  overlay.querySelector('#filtroCarruselQuitar').onclick = ()=>{
+    filtroCarrusel[categoria] = [];
+    overlay.remove();
+    renderCapasLista();
+    showToast('Filtro quitado — el carrusel vuelve a mostrar todas');
+  };
+  mostrarFiltroCarruselGrid(categoria);
+}
+function mostrarFiltroCarruselGrid(categoria){
+  const grid = document.getElementById('filtroCarruselGrid');
+  if(!grid) return;
+  const items = itemsPorCategoria(categoria);
+  const actual = filtroCarrusel[categoria] || [];
+  grid.innerHTML = items.map(p=>`<div class="card" style="cursor:pointer" onclick="toggleFiltroCarruselItem('${escAttr(categoria)}','${p.ID}')">
+    ${fotoRecortadaHtml(p,{estilo:'width:100%', clickable:false})}
+    <div class="body"><div class="tipo">${escAttr(p.Tipo||p.Categoria)}${actual.includes(p.ID)?' ✅':''}</div></div>
+  </div>`).join('');
+}
+function toggleFiltroCarruselItem(categoria, id){
+  const actual = filtroCarrusel[categoria] || [];
+  filtroCarrusel[categoria] = actual.includes(id) ? actual.filter(x=>x!==id) : [...actual, id];
+  mostrarFiltroCarruselGrid(categoria);
+}
 // Una capa normalmente es un ID real de PRENDAS — pero el carrusel ‹›
 // también puede dejarla en "nada" (ej. "me quito la chamarra pero
 // quiero poder volver a ponérmela deslizando, sin borrar y re-agregar")
@@ -4200,6 +4255,7 @@ function renderCapasLista(){
         ${fotoRecortadaHtml(p,{estilo:'height:44px;flex:none;border-radius:8px', clickable:false})}
         <div class="capa-row-info">${escAttr(p.Tipo||p.Categoria)}${sinCapa?`<br><span class="hint" style="color:var(--accent)">⚠️ Todavía no tiene capa para el Vestidor (no se dibuja sobre el maniquí). <a href="javascript:void(0)" onclick="abrirEditarPrenda('${p.ID}')">Regenerar</a></span>`:''}</div>
         ${otras?`<button class="btn ghost" style="padding:4px 8px" onclick="cambiarPrendaCarrusel('${p.ID}',-1)" title="Prenda anterior de ${escAttr(p.Categoria)}">‹</button>
+        <button class="btn ghost" style="padding:4px 8px" onclick="abrirFiltroCarrusel('${escAttr(p.Categoria)}')" title="Elegir cuáles ${escAttr(p.Categoria)} mostrar al deslizar${filtroCarrusel[p.Categoria]&&filtroCarrusel[p.Categoria].length?' ('+filtroCarrusel[p.Categoria].length+' elegidas)':''}">🔍${filtroCarrusel[p.Categoria]&&filtroCarrusel[p.Categoria].length?' '+filtroCarrusel[p.Categoria].length:''}</button>
         <button class="btn ghost" style="padding:4px 8px" onclick="cambiarPrendaCarrusel('${p.ID}',1)" title="Siguiente prenda de ${escAttr(p.Categoria)}">›</button>`:''}
         ${!sinCapa?`<button class="btn ghost" style="padding:4px 8px" onclick="abrirAccionesPrenda(findPrenda('${p.ID}'))" title="Ajustar, borrador, molde y más para esta prenda">✋</button>`:''}
         <button class="btn ghost" style="padding:4px 8px" ${esUltimo?'disabled':''} onclick="moverCapaOutfit('${p.ID}',1)" title="Más encima">▲</button>
@@ -4218,7 +4274,7 @@ function renderCapasLista(){
 function cambiarPrendaCarrusel(idActual, direccion){
   const categoria = esNinguno(idActual) ? categoriaDeNinguno(idActual) : (findPrenda(idActual)||{}).Categoria;
   if(!categoria) return;
-  const reales = itemsPorCategoria(categoria);
+  const reales = itemsCarruselCategoria(categoria);
   if(!reales.length) return;
   const opciones = [...reales.map(p=>p.ID), claveNinguno(categoria)];
   const idxActual = opciones.indexOf(idActual);
