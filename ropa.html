@@ -372,7 +372,7 @@ let SHEET_URL = '';
 // Nombre-landmark de esta versión — cámbialo en cada cambio que se
 // despliegue, así se puede saber a simple vista (en Perfil) si el
 // celular ya está viendo lo último o una copia vieja en caché.
-const BUILD_VERSION = 'Holbox 3';
+const BUILD_VERSION = 'Xel-Ha 3';
 let DATA = { prendas: [], usos: [], outfits_sugeridos: [], perfil: [], fotos_origen: [], maniqui_base: [] };
 let showTrash = false;
 let soloFavoritos = false;
@@ -3874,7 +3874,7 @@ async function pedirSugerencias(){
       <div class="outfit-items">${prendas.map(p=>fotoRecortadaHtml(p,{estilo:'height:64px;flex:none'})).join('')}</div>
       <div class="outfit-motivo">${escAttr(o.motivo||'')}</div>
       <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px">
-        <button class="btn secondary" onclick='usarOutfitHoy(${JSON.stringify(o.prendaIds)})'>Usar hoy</button>
+        <button class="btn secondary" onclick='abrirProgramarOutfit(${JSON.stringify(o.prendaIds)})'>📅 Programar</button>
         <button class="btn secondary" onclick='guardarOutfitGuardado(${JSON.stringify(o.prendaIds)}, ${JSON.stringify(o.motivo||'')}, "", ${JSON.stringify(evento||'')})'>💾 Guardar</button>
         <button class="btn secondary" id="btnMejorarIdea${o._idx}" onclick='mejorarOutfitConIA(${JSON.stringify(o.prendaIds)}, "mejoradoIdea${o._idx}", "btnMejorarIdea${o._idx}")'>✨ Mejorar con IA</button>
       </div>
@@ -3891,6 +3891,43 @@ async function usarOutfitHoy(prendaIds){
     DATA.usos.push(r.uso);
     guardarCacheLocal();
     showToast('Registrado como lo que usaste hoy');
+  } else showToast('No se pudo registrar: '+(r.error||'sin conexión'));
+}
+// "📅 Programar" (antes "Usar hoy", siempre HOY sin poder cambiarlo) —
+// pedido explícito: poder elegir la fecha en la que se usó/se va a usar
+// esta idea, no solo hoy. Mismo registro real (USOS/registrarUso, mismo
+// que "Usar hoy") — solo deja escoger la fecha antes de guardar.
+function abrirProgramarOutfit(prendaIds){
+  const evento = (document.getElementById('sugEvento')||{}).value || '';
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay';
+  overlay.innerHTML = `<div class="modal">
+    <h3>¿Qué día usaste (o vas a usar) este outfit?</h3>
+    <div class="field"><input type="date" id="programarFechaInput" value="${hoyYMD()}"></div>
+    <div class="actions">
+      <button class="btn ghost" id="programarCancelar">Cancelar</button>
+      <button class="btn" id="programarConfirmar">📅 Registrar</button>
+    </div>
+  </div>`;
+  document.body.appendChild(overlay);
+  overlay.addEventListener('click', e=>{ if(e.target===overlay) overlay.remove(); });
+  overlay.querySelector('#programarCancelar').onclick = ()=> overlay.remove();
+  overlay.querySelector('#programarConfirmar').onclick = async ()=>{
+    const valor = document.getElementById('programarFechaInput').value;
+    if(!valor){ showToast('Elige una fecha'); return; }
+    overlay.remove();
+    await registrarOutfitEnFecha(prendaIds, evento, valor);
+  };
+}
+async function registrarOutfitEnFecha(prendaIds, evento, valorFecha){
+  const fecha = new Date(valorFecha).toISOString();
+  const r = await apiPost('registrarUso', { prendaIds, fecha, evento });
+  if(r.ok){
+    prendaIds.forEach(id=>{ const p=findPrenda(id); if(p){ p.UltimoUso=fecha; p.VecesUsado=(Number(p.VecesUsado)||0)+1; } });
+    DATA.usos.push(r.uso);
+    guardarCacheLocal();
+    renderCalendario();
+    showToast('Registrado en Calendario');
   } else showToast('No se pudo registrar: '+(r.error||'sin conexión'));
 }
 
