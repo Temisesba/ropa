@@ -372,7 +372,7 @@ let SHEET_URL = '';
 // Nombre-landmark de esta versión — cámbialo en cada cambio que se
 // despliegue, así se puede saber a simple vista (en Perfil) si el
 // celular ya está viendo lo último o una copia vieja en caché.
-const BUILD_VERSION = 'Cenote Azul 4';
+const BUILD_VERSION = 'Holbox 3';
 let DATA = { prendas: [], usos: [], outfits_sugeridos: [], perfil: [], fotos_origen: [], maniqui_base: [] };
 let showTrash = false;
 let soloFavoritos = false;
@@ -803,8 +803,28 @@ async function guardarPrendaManualDesdeFoto(recortada){
   guardarCacheLocal();
   prendasDeEsteLote.push(row.ID);
   showToast(row.FotoGeneradaURL ? '✓ Guardada — usa 🧽 Borrador para quitarle el fondo' : '✓ Guardada (intenta ajustarla desde Editar prenda)');
-  uploadIndex++;
-  procesarSiguienteFoto();
+  ofrecerOtraPrendaSinIA();
+}
+// Pedido explícito: "si es un outfit pues es más de uno" — antes, tras
+// guardar UNA prenda "sin IA" desde una foto, se pasaba directo a la
+// SIGUIENTE foto de la cola. Ahora ofrece recortar otra prenda de esa
+// MISMA foto (ej. la playera, luego el pantalón, luego los zapatos, los
+// 3 de una sola foto de outfit) antes de avanzar. `cropState.resized`
+// ya guarda la foto original completa (no se limpia después de
+// recortar), así que reabrir el recorte no necesita volver a pedirla.
+function ofrecerOtraPrendaSinIA(){
+  const area = document.getElementById('reviewArea');
+  if(!area || !cropState || !cropState.resized){ uploadIndex++; procesarSiguienteFoto(); return; }
+  const resizedOriginal = cropState.resized;
+  area.innerHTML = `<p class="hint">¿Hay otra prenda en esta misma foto? (ej. el resto del outfit)</p>
+    <div style="display:flex;gap:8px;flex-wrap:wrap">
+      <button class="btn" id="otraPrendaBtn">➕ Recortar otra prenda de esta foto</button>
+      <button class="btn secondary" id="siguienteFotoBtn">➡️ No, siguiente foto</button>
+    </div>`;
+  document.getElementById('otraPrendaBtn').onclick = ()=>{
+    mostrarRecorteManual(resizedOriginal, { containerId:'reviewArea', onListo: analizarFotoRecortada, onDescartar: omitirFoto, onListoSinIA: crearPrendaManualDesdeFoto });
+  };
+  document.getElementById('siguienteFotoBtn').onclick = ()=>{ uploadIndex++; procesarSiguienteFoto(); };
 }
 // Al terminar el lote: todas las prendas creadas/confirmadas quedan a un
 // toque de distancia para ajustar/recortar/eliminar, sin ir a Catálogo.
